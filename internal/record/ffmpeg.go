@@ -30,7 +30,6 @@ func NewFFmpeg(device string, silence time.Duration) *FFmpeg {
 // caller does not specify one explicitly.
 func DefaultDevice() string { return defaultDevice() }
 
-var silenceEnd = regexp.MustCompile(`silence_end:`)
 var silenceStart = regexp.MustCompile(`silence_start:`)
 
 func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
@@ -71,7 +70,6 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 		return "", fmt.Errorf("start ffmpeg: %w", err)
 	}
 
-	var sawVoice bool
 	var diagnostics []string
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { _ = cmd.Process.Signal(os.Interrupt) }) }
@@ -85,10 +83,11 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 			if len(diagnostics) > 12 {
 				diagnostics = diagnostics[1:]
 			}
-			if silenceEnd.MatchString(line) {
-				sawVoice = true
-			}
-			if autoStop && sawVoice && silenceStart.MatchString(line) {
+			// silencedetect reports silence_end only when it first observes a
+			// quiet period. If a speaker starts immediately after enabling the
+			// microphone, that event never occurs; stopping on silence_start is
+			// therefore the reliable definition of “two seconds of silence”.
+			if autoStop && silenceStart.MatchString(line) {
 				stop()
 			}
 		}
