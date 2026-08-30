@@ -31,6 +31,10 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "--":
+		// Everything after `--` belongs to Codex. This keeps hey-codex's
+		// options separate from Codex's and avoids shell parsing entirely.
+		os.Exit(start(os.Args[1:]))
 	case "doctor":
 		os.Exit(doctor(os.Args[2:], os.Stdout))
 	case "setup-api-key":
@@ -78,6 +82,8 @@ func usage(w io.Writer) {
   hey-codex start           То же самое.
   hey-codex start --mode push
                             Говорите, пока удерживаете правый Option.
+  hey-codex -- --approve-for-me
+                            Запустить Codex с его собственным флагом.
   hey-codex stop            Остановить Codex и голосовой ввод.
   hey-codex doctor          Проверить, всё ли готово.
   hey-codex doctor --verify-api
@@ -93,6 +99,13 @@ func usage(w io.Writer) {
 Безопасность
   hey-codex не нажимает Enter за вас. Голос доставляется только в вашу
   собственную сессию Codex, а не в случайное активное окно.
+
+Флаги Codex
+  После -- можно передать любые флаги самого Codex:
+    hey-codex -- --approve-for-me
+    hey-codex -- --model gpt-5.4
+  Это действует при создании новой сессии. Если сессия уже идёт, сначала
+  завершите её: hey-codex stop
 
 `)
 }
@@ -299,8 +312,15 @@ func start(args []string) int {
 		fmt.Fprintln(os.Stderr, "--mode must be tap or push")
 		return 2
 	}
-	if _, err := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput(); err != nil {
-		if output, err := exec.Command("tmux", "new-session", "-d", "-s", *session, "-n", "codex", "-c", mustGetwd(), "codex").CombinedOutput(); err != nil {
+	codexArgs := fs.Args()
+	_, sessionErr := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput()
+	if sessionErr == nil && len(codexArgs) > 0 {
+		fmt.Fprintf(os.Stderr, "Codex flags apply only when creating a session; %q is already running. Run: hey-codex stop\n", *session)
+		return 1
+	}
+	if sessionErr != nil {
+		command := append([]string{"new-session", "-d", "-s", *session, "-n", "codex", "-c", mustGetwd(), "codex"}, codexArgs...)
+		if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
 			fmt.Fprintln(os.Stderr, "start tmux Codex session:", strings.TrimSpace(string(output)))
 			return 1
 		}

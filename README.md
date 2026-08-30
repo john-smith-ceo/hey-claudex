@@ -62,7 +62,8 @@ hey-codex doctor
 hey-codex doctor --verify-api
 hey-codex install
 hey-codex setup-api-key [--env-file /path/to/.env]
-hey-codex [start] [--mode tap|push]
+hey-codex [start] [--mode tap|push] [-- <Codex flags...>]
+hey-codex -- <Codex flags...>
 hey-codex stop
 hey-codex uninstall [--purge-key]
 hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
@@ -71,6 +72,18 @@ hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
 Press `Ctrl+C` to stop the background listener.
 
 For everyday work, run `hey-codex` with no arguments. It creates or resumes its own tmux session, starts Codex plus the voice listener, and attaches the terminal. `hey-codex stop` ends both deliberately.
+
+## Codex flags
+
+Put Codex's own flags after `--`. They are passed directly as separate arguments (not through a shell):
+
+```bash
+hey-codex -- --approve-for-me
+hey-codex -- --model gpt-5.4
+hey-codex start --mode push -- --approve-for-me
+```
+
+`--approve-for-me` is a Codex flag: it routes approval requests through automatic review while retaining the `workspace-write` sandbox. It is not the same as `--dangerously-bypass-approvals-and-sandbox`, which should not be used for normal work. Codex flags take effect only when `hey-codex` creates a new tmux session; this avoids silently terminating an existing conversation. Run `hey-codex stop` first if you want to relaunch with different flags.
 
 `doctor --verify-api` checks authenticated model availability without recording or uploading audio.
 
