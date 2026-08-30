@@ -65,7 +65,7 @@ func doctor(args []string, w io.Writer) int {
 		return 2
 	}
 	failures := 0
-	for _, binary := range []string{"ffmpeg", "pbcopy", "osascript", "security"} {
+	for _, binary := range []string{"ffmpeg", "tmux", "security"} {
 		if path, err := exec.LookPath(binary); err == nil {
 			fmt.Fprintf(w, "ok   %-10s %s\n", binary, path)
 		} else {
@@ -91,7 +91,7 @@ func doctor(args []string, w io.Writer) int {
 		fmt.Fprintln(w, "fail OpenAI API key missing (run: hey-codex setup-api-key)")
 		failures++
 	}
-	fmt.Fprintln(w, "note grant Microphone and Accessibility permissions to the launcher application before run")
+	fmt.Fprintln(w, "note grant Microphone permission to the launcher application before run")
 	if failures > 0 {
 		return 1
 	}
