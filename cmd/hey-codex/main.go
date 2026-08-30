@@ -38,6 +38,8 @@ func main() {
 		os.Exit(setupAPIKey(os.Args[2:], os.Stdin, os.Stdout))
 	case "install":
 		os.Exit(install(os.Stdout))
+	case "tmux":
+		os.Exit(tmuxStart(os.Args[2:]))
 	case "run":
 		os.Exit(run(os.Args[2:]))
 	case "help", "--help", "-h":
@@ -50,7 +52,7 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: hey-codex <doctor|setup-api-key|install|run>")
+	fmt.Fprintln(w, "usage: hey-codex <doctor|setup-api-key|install|tmux|run>")
 }
 
 func doctor(args []string, w io.Writer) int {
@@ -202,6 +204,7 @@ func run(args []string) int {
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
 	silence := fs.Duration("silence", 2*time.Second, "tap-mode silence timeout")
 	device := fs.String("device", ":default", "AVFoundation audio device")
+	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving transcriptions")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -220,12 +223,12 @@ func run(args []string) int {
 	}
 
 	bar := statusbar.New()
-	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr, State: bar.Set})
+	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr, State: bar.Set, TmuxTarget: *tmuxTarget})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode); use the menu-bar icon or Ctrl+C to stop\n", *mode)
+	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode), target %s; use the menu-bar icon or Ctrl+C to stop\n", *mode, *tmuxTarget)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- app.Run(context.Background())
@@ -237,4 +240,36 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func tmuxStart(args []string) int {
+	fs := flag.NewFlagSet("tmux", flag.ContinueOnError)
+	session := fs.String("session", "hey-codex", "tmux session name")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		fmt.Fprintln(os.Stderr, "tmux not found")
+		return 1
+	}
+	if output, err := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput(); err == nil {
+		_ = output
+		fmt.Printf("tmux session %q already exists\n", *session)
+	} else if output, err := exec.Command("tmux", "new-session", "-d", "-s", *session, "-c", mustGetwd(), "codex").CombinedOutput(); err != nil {
+		fmt.Fprintln(os.Stderr, "start tmux Codex session:", strings.TrimSpace(string(output)))
+		return 1
+	} else {
+		fmt.Printf("started Codex in tmux session %q\n", *session)
+	}
+	fmt.Printf("attach: tmux attach -t %s\n", *session)
+	fmt.Printf("listen: hey-codex run --tmux-target %s:0.0\n", *session)
+	return 0
+}
+
+func mustGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
 }

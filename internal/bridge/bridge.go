@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/johnsmith/hey-codex/internal/hotkey"
-	"github.com/johnsmith/hey-codex/internal/paste"
 	"github.com/johnsmith/hey-codex/internal/record"
+	"github.com/johnsmith/hey-codex/internal/tmux"
 	"github.com/johnsmith/hey-codex/internal/transcribe"
 )
 
@@ -25,12 +25,13 @@ const (
 )
 
 type Config struct {
-	Mode    Mode
-	Silence time.Duration
-	Device  string
-	APIKey  string
-	Log     io.Writer
-	State   func(string)
+	Mode       Mode
+	Silence    time.Duration
+	Device     string
+	APIKey     string
+	Log        io.Writer
+	State      func(string)
+	TmuxTarget string
 }
 
 type Bridge struct {
@@ -38,7 +39,7 @@ type Bridge struct {
 	hotkey     hotkey.Listener
 	recorder   record.Recorder
 	transcribe transcribe.Client
-	paste      paste.Paster
+	sender     *tmux.Sender
 
 	mu        sync.Mutex
 	recording bool
@@ -56,12 +57,19 @@ func New(config Config) (*Bridge, error) {
 	if config.Silence <= 0 {
 		return nil, errors.New("silence timeout must be positive")
 	}
+	sender, err := tmux.New(config.TmuxTarget)
+	if err != nil {
+		return nil, err
+	}
+	if err := sender.Check(context.Background()); err != nil {
+		return nil, err
+	}
 	return &Bridge{
 		config:     config,
 		hotkey:     hotkey.NewRightOption(),
 		recorder:   record.NewFFmpeg(config.Device, config.Silence),
 		transcribe: transcribe.NewOpenAI(config.APIKey),
-		paste:      paste.NewMacOS(),
+		sender:     sender,
 	}, nil
 }
 
@@ -114,13 +122,6 @@ func (b *Bridge) start(autoStop bool) {
 	if b.recording {
 		return
 	}
-	target, err := b.paste.ActiveTarget()
-	if err != nil {
-		fmt.Fprintln(b.config.Log, "cannot capture target application:", err)
-		b.state("error")
-		return
-	}
-	fmt.Fprintln(b.config.Log, "recording target:", target)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.session++
 	session := b.session
@@ -155,12 +156,12 @@ func (b *Bridge) start(autoStop bool) {
 			b.state("error")
 			return
 		}
-		if err := b.paste.Paste(text, target); err != nil {
-			fmt.Fprintln(b.config.Log, "paste failed:", err)
+		if err := b.sender.Send(context.Background(), text); err != nil {
+			fmt.Fprintln(b.config.Log, "tmux delivery failed:", err)
 			b.state("error")
 			return
 		}
-		fmt.Fprintln(b.config.Log, "transcription pasted; review it and press Enter yourself")
+		fmt.Fprintf(b.config.Log, "transcription delivered to tmux %s; review it and press Enter yourself\n", b.sender.Target())
 		b.state("pasted")
 		time.AfterFunc(1500*time.Millisecond, func() { b.state("idle") })
 	}()
