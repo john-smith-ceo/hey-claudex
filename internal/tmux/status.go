@@ -46,13 +46,29 @@ func (s *Status) Configure(ctx context.Context) error {
 // Set renders the one meaningful status message instead of tmux's default
 // window list, which would expose the internal voice listener window.
 func (s *Status) Set(ctx context.Context, state string) error {
-	message := "<speech-to-text " + s.label(state) + ">"
+	message := "<speech-to-text " + indicator(state) + s.label(state) + ">"
 	left := "#[fg=#17324D,bold]hey-codex#[fg=#17324D]: codex"
 	if s.flags != "" {
 		left += " #[fg=#315B82]<" + s.flags + ">"
 	}
 	left += " #[fg=#315B82]" + message
 	return s.set(ctx, "status-left", left)
+}
+
+// indicator renders a compact, coloured status light directly beside the
+// speech-to-text label. The final foreground colour restores the neutral
+// status text colour for the label that follows it.
+func indicator(state string) string {
+	color := "#98C379" // idle and a successfully delivered transcription
+	switch state {
+	case "recording":
+		color = "#E06C75"
+	case "transcribing":
+		color = "#E5C07B"
+	case "error":
+		color = "#E06C75"
+	}
+	return "#[fg=" + color + "]●#[fg=#315B82] "
 }
 
 func (s *Status) label(state string) string {

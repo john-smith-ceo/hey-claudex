@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            name: darwin-amd64
+            output: hey-codex_darwin_amd64
+            goarch: amd64
+            cgo: "1"
+          - os: macos-14
+            name: darwin-arm64
+            output: hey-codex_darwin_arm64
+            goarch: arm64
+            cgo: "1"
+          - os: ubuntu-latest
+            name: linux-amd64
+            output: hey-codex_linux_amd64
+            goarch: amd64
+            cgo: "0"
+          - os: ubuntu-latest
+            name: linux-arm64
+            output: hey-codex_linux_arm64
+            goarch: arm64
+            cgo: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - run: go test ./...
+      - run: GOARCH=${{ matrix.goarch }} CGO_ENABLED=${{ matrix.cgo }} go build -trimpath -ldflags="-s -w" -o dist/${{ matrix.output }} ./cmd/hey-codex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum hey-codex_* > checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME"

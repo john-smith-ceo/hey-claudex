@@ -55,6 +55,8 @@ import (
 
 type rightOption struct{}
 
+func GlobalSupported() bool { return true }
+
 var (
 	eventsMu sync.Mutex
 	events   chan Event

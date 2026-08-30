@@ -1,95 +1,130 @@
 # hey-codex
 
-`hey-codex` is a macOS push-to-talk bridge for Codex in tmux. It records from the microphone, transcribes with OpenAI, and delivers the resulting text to one explicit tmux pane. It never presses Enter.
+Voice input for [Codex](https://openai.com/codex/) in one explicit tmux pane.
+`hey-codex` records speech, sends the audio to the OpenAI Transcription API,
+and pastes the returned text into Codex. It never presses Enter: you review
+the text before submitting it.
 
-## Status
+## Platform support
 
-v0.1 is macOS-first and uses only the Go standard library plus system tools:
+| Platform | Input | Credential storage | Status |
+| --- | --- | --- | --- |
+| macOS | Global Right Option hotkey | macOS Keychain | Supported |
+| Linux | `hey-codex record` from a second terminal | `HEY_CODEX_OPENAI_API_KEY` environment variable | Beta |
 
-- global **Right Option** hotkey, intercepted before it reaches the focused application;
-- `tap` mode: press once to start and again to stop; after speech has started, two seconds of silence also stops recording;
-- `push` mode: hold Right Option to record and release it to stop;
-- `ffmpeg` / AVFoundation records a temporary WAV file;
-- `gpt-transcribe` transcribes it via the OpenAI Audio API;
-- `tmux load-buffer` + `tmux paste-buffer` deliver text to one explicit pane, without GUI focus or virtual keystrokes.
-- one session-local, pastel-blue tmux status line shows the current state: mode, recording, transcribing, done, or error. It does not alter your global tmux theme.
+Linux deliberately does not claim a global hotkey. Wayland and X11 have
+incompatible security and input models; an explicit terminal command works on
+both without root privileges or keylogging permissions.
 
-Audio is sent to OpenAI only after recording stops. Temporary audio is removed after a successful or failed transcription attempt.
+## Install a release
 
-## Install prerequisites
+Install `ffmpeg`, `tmux`, and `curl` first. On macOS:
 
-```bash
+```sh
 brew install ffmpeg tmux
 ```
 
-The application which launches `hey-codex` needs **Microphone** permission. It does not require Accessibility permission because delivery is handled by tmux, not GUI automation.
+On Debian or Ubuntu:
 
-## Install from source
-
-```bash
-go build -o bin/hey-codex ./cmd/hey-codex
-./bin/hey-codex doctor
-./bin/hey-codex install
-./bin/hey-codex setup-api-key --env-file /absolute/path/to/.env
-./bin/hey-codex
+```sh
+sudo apt update && sudo apt install ffmpeg tmux curl
 ```
 
-`setup-api-key` stores the OpenAI API key in the macOS login Keychain under service `hey-codex.openai-api-key`. It can read `OPENAI_API_KEY` directly from a dotenv file without printing it. For one-off runs, `HEY_CODEX_OPENAI_API_KEY` takes precedence.
+Then download the latest verified binary:
 
-## Homebrew release
+```sh
+curl -fsSL https://raw.githubusercontent.com/john-smith-ceo/hey-codex/main/scripts/install.sh | sh
+```
 
-The release process publishes `packaging/homebrew/hey-codex.rb.tmpl` into the project's Homebrew tap after replacing `OWNER`, `VERSION`, and `SHA256` with the GitHub release values. The installed user experience is deliberately short:
+The installer downloads the correct release asset, verifies its SHA-256
+checksum, and writes `hey-codex` to `~/.local/bin`. Ensure that directory is on
+your `PATH`.
 
-```bash
-brew install <owner>/tap/hey-codex
+To install a specific version instead:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/john-smith-ceo/hey-codex/main/scripts/install.sh | HEY_CODEX_VERSION=0.1.0 sh
+```
+
+## macOS quick start
+
+```sh
 hey-codex setup-api-key
+hey-codex doctor
 hey-codex
 ```
 
-Removal is equally explicit:
+The launcher needs Microphone permission. Press Right Option once to start
+recording and once again to stop; after speech starts, two seconds of silence
+also stops the recording. Use `--mode push` to record only while holding Right
+Option.
 
-```bash
-hey-codex stop
-brew uninstall hey-codex
+```sh
+hey-codex start --mode push
 ```
 
-The Keychain secret is preserved on normal uninstall; remove it only with `hey-codex uninstall --purge-key`.
+## Linux quick start
+
+```sh
+export HEY_CODEX_OPENAI_API_KEY='your-api-key'
+hey-codex doctor
+hey-codex
+```
+
+`hey-codex` opens the Codex tmux session. From a second terminal, record one
+request and deliver it to the session:
+
+```sh
+hey-codex record
+```
+
+Recording uses the default PipeWire/PulseAudio microphone and ends after two
+seconds of silence. To target another pane or adjust the silence timeout:
+
+```sh
+hey-codex record --tmux-target my-session:0.0 --silence 3s
+```
 
 ## Commands
 
 ```text
-hey-codex doctor
-hey-codex doctor --verify-api
-hey-codex install
-hey-codex setup-api-key [--env-file /path/to/.env]
 hey-codex [start] [--mode tap|push] [-- <Codex flags...>]
-hey-codex -- <Codex flags...>
+hey-codex record [--silence 2s] [--device default] [--tmux-target hey-codex:0.0]
+hey-codex doctor [--verify-api]
+hey-codex setup-api-key [--env-file /absolute/path/to/.env]  # macOS
 hey-codex stop
 hey-codex uninstall [--purge-key]
-hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
 ```
 
-Press `Ctrl+C` to stop the background listener.
+Pass Codex flags after `--`, without shell interpolation:
 
-For everyday work, run `hey-codex` with no arguments. It creates or resumes its own tmux session, starts Codex plus the voice listener, and attaches the terminal. `hey-codex stop` ends both deliberately.
-
-## Codex flags
-
-Put Codex's own flags after `--`. They are passed directly as separate arguments (not through a shell):
-
-```bash
+```sh
 hey-codex -- --approve-for-me
-hey-codex -- --model gpt-5.4
-hey-codex start --mode push -- --approve-for-me
+hey-codex start --mode push -- --model gpt-5.4
 ```
 
-`--approve-for-me` is a Codex flag: it routes approval requests through automatic review while retaining the `workspace-write` sandbox. It is not the same as `--dangerously-bypass-approvals-and-sandbox`, which should not be used for normal work. Codex flags take effect only when `hey-codex` creates a new tmux session; this avoids silently terminating an existing conversation. Run `hey-codex stop` first if you want to relaunch with different flags.
+## Privacy and safety
 
-`doctor --verify-api` checks authenticated model availability without recording or uploading audio.
+- Audio is uploaded to OpenAI only after recording stops.
+- Temporary WAV files are removed after success or failure.
+- The target tmux pane is explicit; no active-window lookup, clipboard access,
+  GUI focus control, or virtual keystrokes are used.
+- `hey-codex` does not submit the pasted text.
 
-## Safety
+## Development and releases
 
-- Right Option is consumed by the event tap; it is not delivered to the terminal.
-- No text is sent automatically. Review it in the Codex input, then press Enter yourself.
-- The destination pane is explicit; no active-window or clipboard access is used.
-- The recorder works only while `hey-codex run` is active.
+```sh
+go test ./...
+go build ./cmd/hey-codex
+```
+
+GitHub Actions tests on macOS and Linux. Pushing a `v*` tag creates a GitHub
+Release with macOS and Linux binaries plus `checksums.txt`.
+
+Homebrew is a macOS distribution channel, not the Linux installation path. A
+tap formula is kept in `packaging/homebrew/`; publish it after the first GitHub
+Release so its version and SHA-256 point at a real immutable tag.
+
+## License
+
+[MIT](LICENSE)

@@ -9,12 +9,17 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/johnsmith/hey-codex/internal/bridge"
+	"github.com/johnsmith/hey-codex/internal/hotkey"
+	"github.com/johnsmith/hey-codex/internal/record"
 	"github.com/johnsmith/hey-codex/internal/secret"
 	"github.com/johnsmith/hey-codex/internal/tmux"
 	"github.com/johnsmith/hey-codex/internal/transcribe"
@@ -46,6 +51,8 @@ func main() {
 		os.Exit(uninstall(os.Args[2:]))
 	case "run":
 		os.Exit(run(os.Args[2:]))
+	case "record":
+		os.Exit(recordOnce(os.Args[2:]))
 	case "help", "--help", "-h":
 		usage(os.Stdout)
 	default:
@@ -85,6 +92,7 @@ func usage(w io.Writer) {
   hey-codex doctor          Проверить, всё ли готово.
   hey-codex doctor --verify-api
                             Проверить доступ к OpenAI без отправки аудио.
+  hey-codex record          Linux: записать одну фразу и вставить текст в Codex.
   hey-codex uninstall       Убрать локальную dev-установку.
   hey-codex uninstall --purge-key
                             Убрать также ключ из Keychain.
@@ -105,6 +113,13 @@ func usage(w io.Writer) {
   Это действует при создании новой сессии. Если сессия уже идёт, сначала
   завершите её: hey-codex stop
 
+Linux beta
+  На Linux используется явная команда записи вместо глобальной горячей клавиши:
+    hey-codex record
+  Она записывает с default PipeWire/PulseAudio microphone, останавливается
+  после двух секунд тишины и вставляет текст в hey-codex:0.0. Запускайте её
+  из второго терминала, пока открыта tmux-сессия Codex.
+
 `)
 }
 
@@ -115,7 +130,11 @@ func doctor(args []string, w io.Writer) int {
 		return 2
 	}
 	failures := 0
-	for _, binary := range []string{"ffmpeg", "tmux", "security"} {
+	binaries := []string{"ffmpeg", "tmux"}
+	if runtime.GOOS == "darwin" {
+		binaries = append(binaries, "security")
+	}
+	for _, binary := range binaries {
 		if path, err := exec.LookPath(binary); err == nil {
 			fmt.Fprintf(w, "ok   %-10s %s\n", binary, path)
 		} else {
@@ -137,11 +156,18 @@ func doctor(args []string, w io.Writer) int {
 				fmt.Fprintln(w, "ok   OpenAI API access to gpt-transcribe")
 			}
 		}
-	} else {
+	} else if runtime.GOOS == "darwin" {
 		fmt.Fprintln(w, "fail OpenAI API key missing (run: hey-codex setup-api-key)")
 		failures++
+	} else {
+		fmt.Fprintln(w, "fail OpenAI API key missing (export HEY_CODEX_OPENAI_API_KEY)")
+		failures++
 	}
-	fmt.Fprintln(w, "note grant Microphone permission to the launcher application before run")
+	if runtime.GOOS == "darwin" {
+		fmt.Fprintln(w, "note grant Microphone permission to the launcher application before run")
+	} else if runtime.GOOS == "linux" {
+		fmt.Fprintln(w, "note Linux uses `hey-codex record`; PipeWire or PulseAudio must expose the default microphone")
+	}
 	if failures > 0 {
 		return 1
 	}
@@ -153,6 +179,10 @@ func setupAPIKey(args []string, in io.Reader, out io.Writer) int {
 	envFile := fs.String("env-file", "", "read OPENAI_API_KEY from a dotenv file")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if runtime.GOOS != "darwin" {
+		fmt.Fprintln(os.Stderr, "setup-api-key uses macOS Keychain; on Linux export HEY_CODEX_OPENAI_API_KEY in your shell profile")
+		return 1
 	}
 	var key string
 	if *envFile != "" {
@@ -260,7 +290,7 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
 	silence := fs.Duration("silence", 2*time.Second, "tap-mode silence timeout")
-	device := fs.String("device", ":default", "AVFoundation audio device")
+	device := fs.String("device", record.DefaultDevice(), "ffmpeg audio input device")
 	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving transcriptions")
 	tmuxSession := fs.String("tmux-session", "hey-codex", "tmux session owning the hey-codex status line")
 	codexFlags := fs.String("codex-flags", "", "Codex arguments to display in the tmux status line")
@@ -271,14 +301,10 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "--mode must be tap or push")
 		return 2
 	}
-	key := os.Getenv("HEY_CODEX_OPENAI_API_KEY")
-	if key == "" {
-		var err error
-		key, err = secret.Load(keychainService)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "OpenAI API key missing; run hey-codex setup-api-key")
-			return 1
-		}
+	key, err := openAIKey()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 
 	status, err := tmux.NewStatus(*tmuxSession, strings.Fields(*codexFlags), *mode)
@@ -304,6 +330,58 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return 1
 	}
+	return 0
+}
+
+// recordOnce is the portable Linux interaction: invoke it from a second
+// terminal, speak, and let silence finish the recording. The transcript is
+// pasted into one explicit tmux pane and is never submitted automatically.
+func recordOnce(args []string) int {
+	fs := flag.NewFlagSet("record", flag.ContinueOnError)
+	silence := fs.Duration("silence", 2*time.Second, "silence timeout before finishing the recording")
+	device := fs.String("device", record.DefaultDevice(), "ffmpeg audio input device")
+	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving the transcription")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *silence <= 0 {
+		fmt.Fprintln(os.Stderr, "--silence must be positive")
+		return 2
+	}
+	key, err := openAIKey()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	sender, err := tmux.New(*tmuxTarget)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "initialize tmux:", err)
+		return 1
+	}
+	if err := sender.Check(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintln(os.Stderr, "recording: speak now; recording stops after silence")
+	path, err := record.NewFFmpeg(*device, *silence).Record(ctx, true)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "record:", err)
+		return 1
+	}
+	defer os.Remove(path)
+	fmt.Fprintln(os.Stderr, "transcribing")
+	text, err := transcribe.NewOpenAI(key).Transcribe(context.Background(), path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "transcribe:", err)
+		return 1
+	}
+	if err := sender.Send(context.Background(), text); err != nil {
+		fmt.Fprintln(os.Stderr, "deliver transcription:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "transcription delivered to tmux %s; review it and press Enter yourself\n", sender.Target())
 	return 0
 }
 
@@ -344,7 +422,7 @@ func start(args []string) int {
 		fmt.Fprintln(os.Stderr, "configure tmux status:", err)
 		return 1
 	}
-	if !tmuxWindowExists(*session, "voice") {
+	if hotkey.GlobalSupported() && !tmuxWindowExists(*session, "voice") {
 		executable, err := os.Executable()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "locate hey-codex executable:", err)
@@ -356,6 +434,9 @@ func start(args []string) int {
 			fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
 			return 1
 		}
+	}
+	if !hotkey.GlobalSupported() {
+		fmt.Fprintf(os.Stderr, "Linux terminal mode: in a second terminal run: hey-codex record --tmux-target %s:0.0\n", *session)
 	}
 	attach := exec.Command("tmux", "attach-session", "-t", *session)
 	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -406,12 +487,30 @@ func uninstall(args []string) int {
 		}
 	}
 	if *purgeKey {
+		if runtime.GOOS != "darwin" {
+			fmt.Fprintln(os.Stderr, "no Keychain key exists on this platform")
+			return 1
+		}
 		if err := exec.Command("security", "delete-generic-password", "-s", keychainService).Run(); err != nil {
 			fmt.Fprintln(os.Stderr, "remove Keychain key:", err)
 			return 1
 		}
 	}
 	return 0
+}
+
+func openAIKey() (string, error) {
+	if key := strings.TrimSpace(os.Getenv("HEY_CODEX_OPENAI_API_KEY")); key != "" {
+		return key, nil
+	}
+	key, err := secret.Load(keychainService)
+	if err == nil && strings.TrimSpace(key) != "" {
+		return key, nil
+	}
+	if runtime.GOOS == "darwin" {
+		return "", errors.New("OpenAI API key missing; run hey-codex setup-api-key")
+	}
+	return "", errors.New("OpenAI API key missing; export HEY_CODEX_OPENAI_API_KEY")
 }
 
 func tmuxWindowExists(session, name string) bool {

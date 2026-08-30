@@ -26,6 +26,10 @@ func NewFFmpeg(device string, silence time.Duration) *FFmpeg {
 	return &FFmpeg{device: device, silence: silence}
 }
 
+// DefaultDevice returns the platform's ffmpeg input device used when the
+// caller does not specify one explicitly.
+func DefaultDevice() string { return defaultDevice() }
+
 var silenceEnd = regexp.MustCompile(`silence_end:`)
 var silenceStart = regexp.MustCompile(`silence_start:`)
 
@@ -42,7 +46,14 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 		os.Remove(path)
 		return "", err
 	}
-	args := []string{"-hide_banner", "-loglevel", "info", "-f", "avfoundation", "-i", r.device, "-ac", "1", "-ar", "16000"}
+	input, err := inputArgs(r.device)
+	if err != nil {
+		os.Remove(path)
+		return "", err
+	}
+	args := []string{"-hide_banner", "-loglevel", "info"}
+	args = append(args, input...)
+	args = append(args, "-ac", "1", "-ar", "16000")
 	if autoStop {
 		args = append(args, "-af", fmt.Sprintf("silencedetect=noise=-35dB:d=%0.3f", r.silence.Seconds()))
 	}
