@@ -42,7 +42,7 @@ hey-codex doctor
 hey-codex doctor --verify-api
 hey-codex install
 hey-codex setup-api-key [--env-file /path/to/.env]
-hey-codex run [--mode tap|push] [--silence 2s] [--device :0]
+hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
 ```
 
 Press `Ctrl+C` to stop the background listener.

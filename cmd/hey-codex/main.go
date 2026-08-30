@@ -197,7 +197,7 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
 	silence := fs.Duration("silence", 2*time.Second, "tap-mode silence timeout")
-	device := fs.String("device", ":0", "AVFoundation audio device")
+	device := fs.String("device", ":default", "AVFoundation audio device")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

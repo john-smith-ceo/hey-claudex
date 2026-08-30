@@ -59,6 +59,7 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	}
 
 	var sawVoice bool
+	var diagnostics []string
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { _ = cmd.Process.Signal(os.Interrupt) }) }
 	doneLogs := make(chan struct{})
@@ -67,6 +68,10 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 		s := bufio.NewScanner(stderr)
 		for s.Scan() {
 			line := s.Text()
+			diagnostics = append(diagnostics, line)
+			if len(diagnostics) > 12 {
+				diagnostics = diagnostics[1:]
+			}
 			if silenceEnd.MatchString(line) {
 				sawVoice = true
 			}
@@ -83,7 +88,7 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	<-doneLogs
 	if err != nil && !strings.Contains(err.Error(), "signal: interrupt") {
 		os.Remove(path)
-		return "", fmt.Errorf("ffmpeg: %w", err)
+		return "", fmt.Errorf("ffmpeg: %w: %s", err, strings.Join(diagnostics, " | "))
 	}
 	info, statErr := os.Stat(path)
 	if statErr != nil || info.Size() < 1024 {
