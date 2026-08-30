@@ -86,7 +86,8 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	}()
 	err = cmd.Wait()
 	<-doneLogs
-	if err != nil && !strings.Contains(err.Error(), "signal: interrupt") {
+	interrupted := strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(strings.Join(diagnostics, "\n"), "Exiting normally, received signal 2.")
+	if err != nil && !interrupted {
 		os.Remove(path)
 		return "", fmt.Errorf("ffmpeg: %w: %s", err, strings.Join(diagnostics, " | "))
 	}
