@@ -120,6 +120,7 @@ func (b *Bridge) start(autoStop bool) {
 		b.state("error")
 		return
 	}
+	fmt.Fprintln(b.config.Log, "recording target:", target)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.session++
 	session := b.session

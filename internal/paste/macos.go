@@ -41,7 +41,9 @@ func (macOS) Paste(text, target string) error {
 	if output, err := copy.CombinedOutput(); err != nil {
 		return errors.New("copy transcription to clipboard: " + strings.TrimSpace(string(output)))
 	}
-	script := `tell application "System Events" to tell process ` + appleScriptString(target) + ` to keystroke "v" using command down`
+	// Keycode 9 is the physical V key on macOS. It avoids keyboard-layout translation
+	// that can make `keystroke "v"` unreliable while a Cyrillic input source is active.
+	script := `tell application "System Events" to tell process ` + appleScriptString(target) + ` to key code 9 using {command down}`
 	cmd := exec.Command("osascript", "-e", script)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return errors.New("paste transcription (grant Accessibility permission): " + strings.TrimSpace(string(bytes.TrimSpace(output))))
