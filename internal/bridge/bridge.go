@@ -114,6 +114,12 @@ func (b *Bridge) start(autoStop bool) {
 	if b.recording {
 		return
 	}
+	target, err := b.paste.ActiveTarget()
+	if err != nil {
+		fmt.Fprintln(b.config.Log, "cannot capture target application:", err)
+		b.state("error")
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	b.session++
 	session := b.session
@@ -148,7 +154,7 @@ func (b *Bridge) start(autoStop bool) {
 			b.state("error")
 			return
 		}
-		if err := b.paste.Paste(text); err != nil {
+		if err := b.paste.Paste(text, target); err != nil {
 			fmt.Fprintln(b.config.Log, "paste failed:", err)
 			b.state("error")
 			return
