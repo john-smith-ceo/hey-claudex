@@ -31,8 +31,7 @@ go build -o bin/hey-codex ./cmd/hey-codex
 ./bin/hey-codex doctor
 ./bin/hey-codex install
 ./bin/hey-codex setup-api-key --env-file /absolute/path/to/.env
-./bin/hey-codex tmux
-./bin/hey-codex run --mode tap --silence 2s --tmux-target hey-codex:0.0
+./bin/hey-codex
 ```
 
 `setup-api-key` stores the OpenAI API key in the macOS login Keychain under service `hey-codex.openai-api-key`. It can read `OPENAI_API_KEY` directly from a dotenv file without printing it. For one-off runs, `HEY_CODEX_OPENAI_API_KEY` takes precedence.
@@ -44,11 +43,14 @@ hey-codex doctor
 hey-codex doctor --verify-api
 hey-codex install
 hey-codex setup-api-key [--env-file /path/to/.env]
-hey-codex tmux [--session hey-codex]
+hey-codex [start] [--mode tap|push]
+hey-codex stop
 hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
 ```
 
 Press `Ctrl+C` to stop the background listener.
+
+For everyday work, run `hey-codex` with no arguments. It creates or resumes its own tmux session, starts Codex plus the voice listener, and attaches the terminal. `hey-codex stop` ends both deliberately.
 
 `doctor --verify-api` checks authenticated model availability without recording or uploading audio.
 

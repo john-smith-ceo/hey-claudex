@@ -27,8 +27,7 @@ func main() {
 	// AppKit creates NSStatusItem/NSWindow internals and requires macOS's original main thread.
 	runtime.LockOSThread()
 	if len(os.Args) < 2 {
-		usage(os.Stderr)
-		os.Exit(2)
+		os.Exit(start(nil))
 	}
 
 	switch os.Args[1] {
@@ -38,8 +37,10 @@ func main() {
 		os.Exit(setupAPIKey(os.Args[2:], os.Stdin, os.Stdout))
 	case "install":
 		os.Exit(install(os.Stdout))
-	case "tmux":
-		os.Exit(tmuxStart(os.Args[2:]))
+	case "start", "tmux":
+		os.Exit(start(os.Args[2:]))
+	case "stop":
+		os.Exit(stop(os.Args[2:]))
 	case "run":
 		os.Exit(run(os.Args[2:]))
 	case "help", "--help", "-h":
@@ -52,7 +53,7 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: hey-codex <doctor|setup-api-key|install|tmux|run>")
+	fmt.Fprintln(w, "usage: hey-codex [start] | hey-codex <stop|doctor|setup-api-key|install|run>")
 }
 
 func doctor(args []string, w io.Writer) int {
@@ -242,9 +243,10 @@ func run(args []string) int {
 	return 0
 }
 
-func tmuxStart(args []string) int {
-	fs := flag.NewFlagSet("tmux", flag.ContinueOnError)
+func start(args []string) int {
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	session := fs.String("session", "hey-codex", "tmux session name")
+	mode := fs.String("mode", "tap", "voice mode: tap or push")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -252,18 +254,62 @@ func tmuxStart(args []string) int {
 		fmt.Fprintln(os.Stderr, "tmux not found")
 		return 1
 	}
-	if output, err := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput(); err == nil {
-		_ = output
-		fmt.Printf("tmux session %q already exists\n", *session)
-	} else if output, err := exec.Command("tmux", "new-session", "-d", "-s", *session, "-c", mustGetwd(), "codex").CombinedOutput(); err != nil {
-		fmt.Fprintln(os.Stderr, "start tmux Codex session:", strings.TrimSpace(string(output)))
-		return 1
-	} else {
-		fmt.Printf("started Codex in tmux session %q\n", *session)
+	if *mode != "tap" && *mode != "push" {
+		fmt.Fprintln(os.Stderr, "--mode must be tap or push")
+		return 2
 	}
-	fmt.Printf("attach: tmux attach -t %s\n", *session)
-	fmt.Printf("listen: hey-codex run --tmux-target %s:0.0\n", *session)
+	if _, err := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput(); err != nil {
+		if output, err := exec.Command("tmux", "new-session", "-d", "-s", *session, "-n", "codex", "-c", mustGetwd(), "codex").CombinedOutput(); err != nil {
+			fmt.Fprintln(os.Stderr, "start tmux Codex session:", strings.TrimSpace(string(output)))
+			return 1
+		}
+	}
+	if !tmuxWindowExists(*session, "voice") {
+		executable, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "locate hey-codex executable:", err)
+			return 1
+		}
+		target := *session + ":0.0"
+		command := []string{"new-window", "-d", "-t", *session, "-n", "voice", "-c", mustGetwd(), executable, "run", "--mode", *mode, "--tmux-target", target}
+		if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
+			fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
+			return 1
+		}
+	}
+	attach := exec.Command("tmux", "attach-session", "-t", *session)
+	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := attach.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "attach tmux:", err)
+		return 1
+	}
 	return 0
+}
+
+func stop(args []string) int {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	session := fs.String("session", "hey-codex", "tmux session name")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if output, err := exec.Command("tmux", "kill-session", "-t", *session).CombinedOutput(); err != nil {
+		fmt.Fprintln(os.Stderr, "stop hey-codex:", strings.TrimSpace(string(output)))
+		return 1
+	}
+	return 0
+}
+
+func tmuxWindowExists(session, name string) bool {
+	output, err := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
+	if err != nil {
+		return false
+	}
+	for _, window := range strings.Fields(string(output)) {
+		if window == name {
+			return true
+		}
+	}
+	return false
 }
 
 func mustGetwd() string {
