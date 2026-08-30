@@ -6,21 +6,17 @@ static void heyCodexApplyState(NSString *state) {
     if (heyCodexItem == nil) return;
     NSStatusBarButton *button = heyCodexItem.button;
     if ([state isEqualToString:@"recording"]) {
-        button.title = @"●";
+        button.title = @"🔴";
         button.toolTip = @"hey-codex: recording";
-        button.contentTintColor = NSColor.systemRedColor;
     } else if ([state isEqualToString:@"transcribing"]) {
-        button.title = @"◌";
+        button.title = @"🟡";
         button.toolTip = @"hey-codex: transcribing";
-        button.contentTintColor = NSColor.systemOrangeColor;
     } else if ([state isEqualToString:@"pasted"]) {
-        button.title = @"✓";
+        button.title = @"✅";
         button.toolTip = @"hey-codex: transcription pasted";
-        button.contentTintColor = NSColor.systemGreenColor;
     } else if ([state isEqualToString:@"error"]) {
-        button.title = @"!";
+        button.title = @"⚠️";
         button.toolTip = @"hey-codex: see terminal for error";
-        button.contentTintColor = NSColor.systemRedColor;
     } else {
         button.title = @"🎙";
         button.toolTip = @"hey-codex: ready (Right Option)";
