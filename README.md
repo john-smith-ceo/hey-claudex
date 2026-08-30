@@ -24,7 +24,7 @@ brew install ffmpeg
 
 The application which launches `hey-codex` needs **Microphone** permission. `hey-codex` also needs **Accessibility** permission to paste into the active terminal.
 
-## Build and run
+## Install from source
 
 ```bash
 go build -o bin/hey-codex ./cmd/hey-codex
@@ -36,6 +36,25 @@ go build -o bin/hey-codex ./cmd/hey-codex
 
 `setup-api-key` stores the OpenAI API key in the macOS login Keychain under service `hey-codex.openai-api-key`. It can read `OPENAI_API_KEY` directly from a dotenv file without printing it. For one-off runs, `HEY_CODEX_OPENAI_API_KEY` takes precedence.
 
+## Homebrew release
+
+The release process publishes `packaging/homebrew/hey-codex.rb.tmpl` into the project's Homebrew tap after replacing `OWNER`, `VERSION`, and `SHA256` with the GitHub release values. The installed user experience is deliberately short:
+
+```bash
+brew install <owner>/tap/hey-codex
+hey-codex setup-api-key
+hey-codex
+```
+
+Removal is equally explicit:
+
+```bash
+hey-codex stop
+brew uninstall hey-codex
+```
+
+The Keychain secret is preserved on normal uninstall; remove it only with `hey-codex uninstall --purge-key`.
+
 ## Commands
 
 ```text
@@ -45,6 +64,7 @@ hey-codex install
 hey-codex setup-api-key [--env-file /path/to/.env]
 hey-codex [start] [--mode tap|push]
 hey-codex stop
+hey-codex uninstall [--purge-key]
 hey-codex run [--mode tap|push] [--silence 2s] [--device :default]
 ```
 

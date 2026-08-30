@@ -41,6 +41,8 @@ func main() {
 		os.Exit(start(os.Args[2:]))
 	case "stop":
 		os.Exit(stop(os.Args[2:]))
+	case "uninstall":
+		os.Exit(uninstall(os.Args[2:]))
 	case "run":
 		os.Exit(run(os.Args[2:]))
 	case "help", "--help", "-h":
@@ -53,7 +55,7 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: hey-codex [start] | hey-codex <stop|doctor|setup-api-key|install|run>")
+	fmt.Fprintln(w, "usage: hey-codex [start] | hey-codex <stop|uninstall|doctor|setup-api-key|install|run>")
 }
 
 func doctor(args []string, w io.Writer) int {
@@ -295,6 +297,41 @@ func stop(args []string) int {
 	if output, err := exec.Command("tmux", "kill-session", "-t", *session).CombinedOutput(); err != nil {
 		fmt.Fprintln(os.Stderr, "stop hey-codex:", strings.TrimSpace(string(output)))
 		return 1
+	}
+	return 0
+}
+
+// uninstall removes the developer-installed command. Homebrew removes its own
+// binary; --purge-key additionally removes the API key from the login Keychain.
+func uninstall(args []string) int {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	purgeKey := fs.Bool("purge-key", false, "also remove the OpenAI API key from macOS Keychain")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	_ = stop(nil)
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "locate executable:", err)
+		return 1
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "locate home directory:", err)
+		return 1
+	}
+	target := filepath.Join(home, ".local", "bin", "hey-codex")
+	if current, err := filepath.EvalSymlinks(target); err == nil && current == executable {
+		if err := os.Remove(target); err != nil {
+			fmt.Fprintln(os.Stderr, "remove developer symlink:", err)
+			return 1
+		}
+	}
+	if *purgeKey {
+		if err := exec.Command("security", "delete-generic-password", "-s", keychainService).Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "remove Keychain key:", err)
+			return 1
+		}
 	}
 	return 0
 }
