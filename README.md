@@ -12,7 +12,7 @@ v0.1 is macOS-first and uses only the Go standard library plus system tools:
 - `ffmpeg` / AVFoundation records a temporary WAV file;
 - `gpt-transcribe` transcribes it via the OpenAI Audio API;
 - `tmux load-buffer` + `tmux paste-buffer` deliver text to one explicit pane, without GUI focus or virtual keystrokes.
-- a menu-bar microphone shows the current state: ready, recording, transcribing, pasted, or error.
+- one session-local, pastel-blue tmux status line shows the current state: mode, recording, transcribing, done, or error. It does not alter your global tmux theme.
 
 Audio is sent to OpenAI only after recording stops. Temporary audio is removed after a successful or failed transcription attempt.
 

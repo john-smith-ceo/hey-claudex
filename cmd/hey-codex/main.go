@@ -10,22 +10,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/johnsmith/hey-codex/internal/bridge"
 	"github.com/johnsmith/hey-codex/internal/secret"
-	"github.com/johnsmith/hey-codex/internal/statusbar"
+	"github.com/johnsmith/hey-codex/internal/tmux"
 	"github.com/johnsmith/hey-codex/internal/transcribe"
 )
 
 const keychainService = "hey-codex.openai-api-key"
 
 func main() {
-	// AppKit creates NSStatusItem/NSWindow internals and requires macOS's original main thread.
-	runtime.LockOSThread()
 	if len(os.Args) < 2 {
 		os.Exit(start(nil))
 	}
@@ -92,9 +89,10 @@ func usage(w io.Writer) {
   hey-codex uninstall --purge-key
                             Убрать также ключ из Keychain.
 
-Индикатор в верхней строке macOS
-  🎙  готов слушать     🔴  запись     🟡  расшифровка
-  ✅  текст доставлен   ⚠️  ошибка — посмотрите терминал
+Строка tmux
+  Пастельно-синяя строка внизу терминала показывает mode:tap, rec…,
+  transcribe…, done или error. Настраивается только сессия hey-codex:
+  ваша глобальная тема tmux не меняется.
 
 Безопасность
   hey-codex не нажимает Enter за вас. Голос доставляется только в вашу
@@ -264,6 +262,8 @@ func run(args []string) int {
 	silence := fs.Duration("silence", 2*time.Second, "tap-mode silence timeout")
 	device := fs.String("device", ":default", "AVFoundation audio device")
 	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving transcriptions")
+	tmuxSession := fs.String("tmux-session", "hey-codex", "tmux session owning the hey-codex status line")
+	codexFlags := fs.String("codex-flags", "", "Codex arguments to display in the tmux status line")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -281,20 +281,26 @@ func run(args []string) int {
 		}
 	}
 
-	bar := statusbar.New()
-	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr, State: bar.Set, TmuxTarget: *tmuxTarget})
+	status, err := tmux.NewStatus(*tmuxSession, strings.Fields(*codexFlags), *mode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "initialize tmux status:", err)
+		return 1
+	}
+	if err := status.Configure(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "configure tmux status:", err)
+		return 1
+	}
+	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr, State: func(state string) {
+		if err := status.Set(context.Background(), state); err != nil {
+			fmt.Fprintln(os.Stderr, "update tmux status:", err)
+		}
+	}, TmuxTarget: *tmuxTarget})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode), target %s; use the menu-bar icon or Ctrl+C to stop\n", *mode, *tmuxTarget)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(context.Background())
-		bar.Stop()
-	}()
-	bar.Run()
-	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode), target %s; Ctrl+C stops the listener\n", *mode, *tmuxTarget)
+	if err := app.Run(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return 1
 	}
@@ -329,6 +335,15 @@ func start(args []string) int {
 			return 1
 		}
 	}
+	status, err := tmux.NewStatus(*session, codexArgs, *mode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "initialize tmux status:", err)
+		return 1
+	}
+	if err := status.Configure(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "configure tmux status:", err)
+		return 1
+	}
 	if !tmuxWindowExists(*session, "voice") {
 		executable, err := os.Executable()
 		if err != nil {
@@ -336,7 +351,7 @@ func start(args []string) int {
 			return 1
 		}
 		target := *session + ":0.0"
-		command := []string{"new-window", "-d", "-t", *session, "-n", "voice", "-c", mustGetwd(), executable, "run", "--mode", *mode, "--tmux-target", target}
+		command := []string{"new-window", "-d", "-t", *session, "-n", "voice", "-c", mustGetwd(), executable, "run", "--mode", *mode, "--tmux-target", target, "--tmux-session", *session, "--codex-flags", strings.Join(codexArgs, " ")}
 		if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
 			fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
 			return 1
