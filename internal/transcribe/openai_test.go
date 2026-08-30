@@ -27,7 +27,7 @@ func TestTranscribeSendsMultipartAudio(t *testing.T) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatal(err)
 		}
-		if got := r.FormValue("model"); got != "gpt-4o-mini-transcribe" {
+		if got := r.FormValue("model"); got != "gpt-transcribe" {
 			t.Fatalf("model = %q", got)
 		}
 		f, _, err := r.FormFile("file")

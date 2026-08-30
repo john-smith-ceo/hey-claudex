@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/johnsmith/hey-codex/internal/bridge"
 	"github.com/johnsmith/hey-codex/internal/secret"
+	"github.com/johnsmith/hey-codex/internal/transcribe"
 )
 
 const keychainService = "hey-codex.openai-api-key"
@@ -27,9 +29,9 @@ func main() {
 
 	switch os.Args[1] {
 	case "doctor":
-		os.Exit(doctor(os.Stdout))
+		os.Exit(doctor(os.Args[2:], os.Stdout))
 	case "setup-api-key":
-		os.Exit(setupAPIKey(os.Stdin, os.Stdout))
+		os.Exit(setupAPIKey(os.Args[2:], os.Stdin, os.Stdout))
 	case "install":
 		os.Exit(install(os.Stdout))
 	case "run":
@@ -47,7 +49,12 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hey-codex <doctor|setup-api-key|install|run>")
 }
 
-func doctor(w io.Writer) int {
+func doctor(args []string, w io.Writer) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	verifyAPI := fs.Bool("verify-api", false, "verify API access without sending audio")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	failures := 0
 	for _, binary := range []string{"ffmpeg", "pbcopy", "osascript", "security"} {
 		if path, err := exec.LookPath(binary); err == nil {
@@ -57,8 +64,20 @@ func doctor(w io.Writer) int {
 			failures++
 		}
 	}
-	if _, err := secret.Load(keychainService); err == nil || os.Getenv("HEY_CODEX_OPENAI_API_KEY") != "" {
+	key := os.Getenv("HEY_CODEX_OPENAI_API_KEY")
+	if key == "" {
+		key, _ = secret.Load(keychainService)
+	}
+	if key != "" {
 		fmt.Fprintln(w, "ok   OpenAI API key available")
+		if *verifyAPI {
+			if err := transcribe.Verify(context.Background(), key); err != nil {
+				fmt.Fprintln(w, "fail OpenAI API access:", err)
+				failures++
+			} else {
+				fmt.Fprintln(w, "ok   OpenAI API access to gpt-transcribe")
+			}
+		}
 	} else {
 		fmt.Fprintln(w, "fail OpenAI API key missing (run: hey-codex setup-api-key)")
 		failures++
@@ -70,27 +89,70 @@ func doctor(w io.Writer) int {
 	return 0
 }
 
-func setupAPIKey(in io.Reader, out io.Writer) int {
-	fmt.Fprint(out, "OpenAI API key: ")
-	if file, ok := in.(*os.File); ok && file == os.Stdin {
-		if err := exec.Command("stty", "-echo").Run(); err == nil {
-			defer func() {
-				_ = exec.Command("stty", "echo").Run()
-				fmt.Fprintln(out)
-			}()
+func setupAPIKey(args []string, in io.Reader, out io.Writer) int {
+	fs := flag.NewFlagSet("setup-api-key", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "read OPENAI_API_KEY from a dotenv file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	var key string
+	if *envFile != "" {
+		loaded, err := loadDotenvKey(*envFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load API key:", err)
+			return 1
 		}
+		key = loaded
+	} else {
+		fmt.Fprint(out, "OpenAI API key: ")
+		if file, ok := in.(*os.File); ok && file == os.Stdin {
+			if err := exec.Command("stty", "-echo").Run(); err == nil {
+				defer func() {
+					_ = exec.Command("stty", "echo").Run()
+					fmt.Fprintln(out)
+				}()
+			}
+		}
+		entered, err := bufio.NewReader(in).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			fmt.Fprintln(os.Stderr, "read API key:", err)
+			return 1
+		}
+		key = strings.TrimSpace(entered)
 	}
-	key, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		fmt.Fprintln(os.Stderr, "read API key:", err)
-		return 1
-	}
-	if err := secret.Save(keychainService, strings.TrimSpace(key)); err != nil {
+	if err := secret.Save(keychainService, key); err != nil {
 		fmt.Fprintln(os.Stderr, "save API key:", err)
 		return 1
 	}
 	fmt.Fprintln(out, "saved in the macOS login Keychain")
 	return 0
+}
+
+func loadDotenvKey(path string) (string, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+		name, value, found := strings.Cut(line, "=")
+		if !found || strings.TrimSpace(name) != "OPENAI_API_KEY" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			if unquoted, err := strconv.Unquote(value); err == nil {
+				value = unquoted
+			} else {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if value == "" {
+			return "", errors.New("OPENAI_API_KEY is empty")
+		}
+		return value, nil
+	}
+	return "", errors.New("OPENAI_API_KEY not found")
 }
 
 func install(out io.Writer) int {

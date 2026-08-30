@@ -16,6 +16,10 @@ import (
 
 var endpoint = "https://api.openai.com/v1/audio/transcriptions"
 
+const modelEndpoint = "https://api.openai.com/v1/models/gpt-transcribe"
+
+const model = "gpt-transcribe"
+
 type Client interface {
 	Transcribe(context.Context, string) (string, error)
 }
@@ -32,6 +36,24 @@ type OpenAI struct {
 }
 
 func NewOpenAI(apiKey string) *OpenAI { return &OpenAI{apiKey: apiKey, http: http.DefaultClient} }
+
+// Verify checks authentication and model visibility without uploading audio.
+func Verify(ctx context.Context, apiKey string) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, modelEndpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("OpenAI returned %s", response.Status)
+	}
+	return nil
+}
 
 func (c *OpenAI) Transcribe(ctx context.Context, filename string) (string, error) {
 	if strings.TrimSpace(c.apiKey) == "" {
@@ -51,7 +73,7 @@ func (c *OpenAI) Transcribe(ctx context.Context, filename string) (string, error
 	if _, err := io.Copy(part, f); err != nil {
 		return "", err
 	}
-	if err := w.WriteField("model", "gpt-4o-mini-transcribe"); err != nil {
+	if err := w.WriteField("model", model); err != nil {
 		return "", err
 	}
 	if err := w.Close(); err != nil {
