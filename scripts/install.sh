@@ -16,11 +16,11 @@ need curl
 need tmux
 need ffmpeg
 
-case "$(uname -s)" in
-  Darwin) platform=darwin ;;
-  Linux) platform=linux ;;
-  *) echo "unsupported operating system: $(uname -s)" >&2; exit 1 ;;
-esac
+if [ "$(uname -s)" != Darwin ]; then
+  echo "hey-codex currently supports macOS only" >&2
+  exit 1
+fi
+platform=darwin
 
 case "$(uname -m)" in
   x86_64|amd64) arch=amd64 ;;

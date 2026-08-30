@@ -1,102 +1,57 @@
 # hey-codex
 
-Voice input for [Codex](https://openai.com/codex/) in one explicit tmux pane.
-`hey-codex` records speech, sends the audio to the OpenAI Transcription API,
-and pastes the returned text into Codex. It never presses Enter: you review
-the text before submitting it.
+macOS voice input for [Codex](https://openai.com/codex/) in one explicit tmux
+pane. `hey-codex` records speech, sends audio to the OpenAI Transcription API,
+and pastes the returned text into Codex. It never presses Enter: you review the
+text before submitting it.
 
-## Platform support
-
-| Platform | Input | Credential storage | Status |
-| --- | --- | --- | --- |
-| macOS | Global Right Option hotkey | macOS Keychain | Supported |
-| Linux | `hey-codex record` from a second terminal | `HEY_CODEX_OPENAI_API_KEY` environment variable | Beta |
-
-Linux deliberately does not claim a global hotkey. Wayland and X11 have
-incompatible security and input models; an explicit terminal command works on
-both without root privileges or keylogging permissions.
-
-## Install a release
-
-Install `ffmpeg`, `tmux`, and `curl` first. On macOS:
+## Install
 
 ```sh
 brew install ffmpeg tmux
-```
-
-On Debian or Ubuntu:
-
-```sh
-sudo apt update && sudo apt install ffmpeg tmux curl
-```
-
-Then download the latest verified binary:
-
-```sh
 curl -fsSL https://raw.githubusercontent.com/john-smith-ceo/hey-codex/main/scripts/install.sh | sh
-```
-
-The installer downloads the correct release asset, verifies its SHA-256
-checksum, and writes `hey-codex` to `~/.local/bin`. Ensure that directory is on
-your `PATH`.
-
-To install a specific version instead:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/john-smith-ceo/hey-codex/main/scripts/install.sh | HEY_CODEX_VERSION=0.1.0 sh
-```
-
-## macOS quick start
-
-```sh
 hey-codex setup-api-key
 hey-codex doctor
 hey-codex
 ```
 
-The launcher needs Microphone permission. Press Right Option once to start
-recording and once again to stop; after speech starts, two seconds of silence
-also stops the recording. Use `--mode push` to record only while holding Right
-Option.
+The installer downloads the correct macOS release binary, verifies its SHA-256
+checksum, and writes `hey-codex` to `~/.local/bin`. Ensure that directory is on
+your `PATH`.
+
+`setup-api-key` prompts for your OpenAI API key and stores it in the macOS login
+Keychain. You can instead read it from a dotenv file:
+
+```sh
+hey-codex setup-api-key --env-file /absolute/path/to/.env
+```
+
+Grant Microphone permission to the terminal application that launches
+`hey-codex`.
+
+## Use
+
+Run `hey-codex`, then press Right Option once to start recording. Press it
+again to stop, or pause for two seconds after speaking. The transcript appears
+in Codex for review; you press Enter yourself.
+
+For push-to-talk, hold Right Option while speaking:
 
 ```sh
 hey-codex start --mode push
-```
-
-## Linux quick start
-
-```sh
-export HEY_CODEX_OPENAI_API_KEY='your-api-key'
-hey-codex doctor
-hey-codex
-```
-
-`hey-codex` opens the Codex tmux session. From a second terminal, record one
-request and deliver it to the session:
-
-```sh
-hey-codex record
-```
-
-Recording uses the default PipeWire/PulseAudio microphone and ends after two
-seconds of silence. To target another pane or adjust the silence timeout:
-
-```sh
-hey-codex record --tmux-target my-session:0.0 --silence 3s
 ```
 
 ## Commands
 
 ```text
 hey-codex [start] [--mode tap|push] [-- <Codex flags...>]
-hey-codex record [--silence 2s] [--device default] [--tmux-target hey-codex:0.0]
 hey-codex doctor [--verify-api]
-hey-codex setup-api-key [--env-file /absolute/path/to/.env]  # macOS
+hey-codex setup-api-key [--env-file /absolute/path/to/.env]
 hey-codex stop
 hey-codex uninstall [--purge-key]
 ```
 
-Pass Codex flags after `--`, without shell interpolation:
+Pass Codex flags after `--`:
 
 ```sh
 hey-codex -- --approve-for-me
@@ -118,12 +73,9 @@ go test ./...
 go build ./cmd/hey-codex
 ```
 
-GitHub Actions tests on macOS and Linux. Pushing a `v*` tag creates a GitHub
-Release with macOS and Linux binaries plus `checksums.txt`.
-
-Homebrew is a macOS distribution channel, not the Linux installation path. A
-tap formula is kept in `packaging/homebrew/`; publish it after the first GitHub
-Release so its version and SHA-256 point at a real immutable tag.
+GitHub Actions tests and builds macOS release binaries. Pushing a `v*` tag
+creates a GitHub Release with Intel and Apple Silicon binaries plus
+`checksums.txt`.
 
 ## License
 

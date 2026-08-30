@@ -55,7 +55,9 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	args = append(args, input...)
 	args = append(args, "-ac", "1", "-ar", "16000")
 	if autoStop {
-		args = append(args, "-af", fmt.Sprintf("silencedetect=noise=-35dB:d=%0.3f", r.silence.Seconds()))
+		// Laptop microphones often have a noise floor above -35 dBFS. -25 dBFS
+		// still distinguishes normal speech while treating room noise as silence.
+		args = append(args, "-af", fmt.Sprintf("silencedetect=noise=-25dB:d=%0.3f", r.silence.Seconds()))
 	}
 	args = append(args, "-c:a", "pcm_s16le", "-y", path)
 	cmd := exec.Command("ffmpeg", args...)
@@ -97,7 +99,7 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	}()
 	err = cmd.Wait()
 	<-doneLogs
-	interrupted := strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(strings.Join(diagnostics, "\n"), "Exiting normally, received signal 2.")
+	interrupted := err != nil && (strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(strings.Join(diagnostics, "\n"), "Exiting normally, received signal 2."))
 	if err != nil && !interrupted {
 		os.Remove(path)
 		return "", fmt.Errorf("ffmpeg: %w: %s", err, strings.Join(diagnostics, " | "))

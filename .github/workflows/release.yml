@@ -25,16 +25,6 @@ jobs:
             output: hey-codex_darwin_arm64
             goarch: arm64
             cgo: "1"
-          - os: ubuntu-latest
-            name: linux-amd64
-            output: hey-codex_linux_amd64
-            goarch: amd64
-            cgo: "0"
-          - os: ubuntu-latest
-            name: linux-arm64
-            output: hey-codex_linux_arm64
-            goarch: arm64
-            cgo: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
