@@ -55,7 +55,46 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: hey-codex [start] | hey-codex <stop|uninstall|doctor|setup-api-key|install|run>")
+	fmt.Fprint(w, `hey-codex — голосовой ввод для Codex
+
+Самый простой старт
+  hey-codex
+      Откроет Codex и включит голосовой ввод. Больше ничего помнить не нужно.
+
+Как говорить
+  1. Нажмите правый Option один раз.
+  2. Скажите задачу.
+  3. Нажмите правый Option ещё раз — или просто помолчите 2 секунды.
+  4. Текст появится в Codex. Проверьте его и нажмите Enter сами.
+
+Первый запуск
+  hey-codex setup-api-key
+      Сохранит ваш OpenAI API key в macOS Keychain.
+  hey-codex doctor
+      Проверит микрофон, tmux, ffmpeg и ключ.
+
+Полезные команды
+  hey-codex                 Открыть Codex с голосовым вводом.
+  hey-codex start           То же самое.
+  hey-codex start --mode push
+                            Говорите, пока удерживаете правый Option.
+  hey-codex stop            Остановить Codex и голосовой ввод.
+  hey-codex doctor          Проверить, всё ли готово.
+  hey-codex doctor --verify-api
+                            Проверить доступ к OpenAI без отправки аудио.
+  hey-codex uninstall       Убрать локальную dev-установку.
+  hey-codex uninstall --purge-key
+                            Убрать также ключ из Keychain.
+
+Индикатор в верхней строке macOS
+  🎙  готов слушать     🔴  запись     🟡  расшифровка
+  ✅  текст доставлен   ⚠️  ошибка — посмотрите терминал
+
+Безопасность
+  hey-codex не нажимает Enter за вас. Голос доставляется только в вашу
+  собственную сессию Codex, а не в случайное активное окно.
+
+`)
 }
 
 func doctor(args []string, w io.Writer) int {
