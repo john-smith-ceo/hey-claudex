@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnsmith/hey-codex/internal/bridge"
 	"github.com/johnsmith/hey-codex/internal/secret"
+	"github.com/johnsmith/hey-codex/internal/statusbar"
 	"github.com/johnsmith/hey-codex/internal/transcribe"
 )
 
@@ -215,13 +216,20 @@ func run(args []string) int {
 		}
 	}
 
-	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr})
+	bar := statusbar.New()
+	app, err := bridge.New(bridge.Config{Mode: bridge.Mode(*mode), Silence: *silence, Device: *device, APIKey: key, Log: os.Stderr, State: bar.Set})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode); Ctrl+C to stop\n", *mode)
-	if err := app.Run(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+	fmt.Fprintf(os.Stderr, "hey-codex ready: Right Option (%s mode); use the menu-bar icon or Ctrl+C to stop\n", *mode)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.Run(context.Background())
+		bar.Stop()
+	}()
+	bar.Run()
+	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return 1
 	}

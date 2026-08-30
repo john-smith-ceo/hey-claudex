@@ -30,6 +30,7 @@ type Config struct {
 	Device  string
 	APIKey  string
 	Log     io.Writer
+	State   func(string)
 }
 
 type Bridge struct {
@@ -118,6 +119,7 @@ func (b *Bridge) start(autoStop bool) {
 	session := b.session
 	b.recording, b.cancel = true, cancel
 	fmt.Fprintln(b.config.Log, "recording started")
+	b.state("recording")
 	go func() {
 		file, err := b.recorder.Record(ctx, autoStop)
 		b.mu.Lock()
@@ -129,24 +131,31 @@ func (b *Bridge) start(autoStop bool) {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				fmt.Fprintln(b.config.Log, "recording failed:", err)
+				b.state("error")
 			}
 			return
 		}
 		defer os.Remove(file)
 		if discard {
+			b.state("idle")
 			return
 		}
 		fmt.Fprintln(b.config.Log, "transcribing")
+		b.state("transcribing")
 		text, err := b.transcribe.Transcribe(context.Background(), file)
 		if err != nil {
 			fmt.Fprintln(b.config.Log, "transcription failed:", err)
+			b.state("error")
 			return
 		}
 		if err := b.paste.Paste(text); err != nil {
 			fmt.Fprintln(b.config.Log, "paste failed:", err)
+			b.state("error")
 			return
 		}
 		fmt.Fprintln(b.config.Log, "transcription pasted; review it and press Enter yourself")
+		b.state("pasted")
+		time.AfterFunc(1500*time.Millisecond, func() { b.state("idle") })
 	}()
 }
 
@@ -157,9 +166,16 @@ func (b *Bridge) stop(transcribe bool) {
 		return
 	}
 	fmt.Fprintln(b.config.Log, "recording stopped")
+	b.state("transcribing")
 	b.cancel()
 	if !transcribe {
 		b.session++
 		b.recording, b.cancel = false, nil
+	}
+}
+
+func (b *Bridge) state(value string) {
+	if b.config.State != nil {
+		b.config.State(value)
 	}
 }

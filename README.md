@@ -12,6 +12,7 @@ v0.1 is macOS-first and uses only the Go standard library plus system tools:
 - `ffmpeg` / AVFoundation records a temporary WAV file;
 - `gpt-transcribe` transcribes it via the OpenAI Audio API;
 - `pbcopy` + macOS Accessibility paste the text, without sending it.
+- a menu-bar microphone shows the current state: ready, recording, transcribing, pasted, or error.
 
 Audio is sent to OpenAI only after recording stops. Temporary audio is removed after a successful or failed transcription attempt.
 
