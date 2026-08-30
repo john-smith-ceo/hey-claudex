@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ import (
 const keychainService = "hey-codex.openai-api-key"
 
 func main() {
+	// AppKit creates NSStatusItem/NSWindow internals and requires macOS's original main thread.
+	runtime.LockOSThread()
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)
