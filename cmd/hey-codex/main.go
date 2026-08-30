@@ -217,6 +217,10 @@ func loadDotenvKey(path string) (string, error) {
 }
 
 func install(out io.Writer) int {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		fmt.Fprintln(os.Stderr, "tmux is required; install it first: brew install tmux")
+		return 1
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "locate executable:", err)

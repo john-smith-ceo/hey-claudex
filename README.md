@@ -19,7 +19,7 @@ Audio is sent to OpenAI only after recording stops. Temporary audio is removed a
 ## Install prerequisites
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg tmux
 ```
 
 The application which launches `hey-codex` needs **Microphone** permission. It does not require Accessibility permission because delivery is handled by tmux, not GUI automation.
