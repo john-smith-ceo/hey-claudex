@@ -32,7 +32,7 @@ Grant Microphone permission to the terminal application that launches
 ## Use
 
 Run `hey-codex`, then press Right Option once to start recording. Press it
-again to stop, or pause for three seconds after speaking. The transcript appears
+again to stop, or pause for five seconds after speaking. The transcript appears
 in Codex for review; you press Enter yourself.
 
 For push-to-talk, hold Right Option while speaking:

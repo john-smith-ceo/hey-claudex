@@ -259,7 +259,7 @@ func install(out io.Writer) int {
 func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
-	silence := fs.Duration("silence", 3*time.Second, "tap-mode silence timeout")
+	silence := fs.Duration("silence", 5*time.Second, "tap-mode silence timeout")
 	device := fs.String("device", ":default", "AVFoundation audio device")
 	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving transcriptions")
 	tmuxSession := fs.String("tmux-session", "hey-codex", "tmux session owning the hey-codex status line")
