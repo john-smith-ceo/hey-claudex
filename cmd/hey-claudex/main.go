@@ -118,6 +118,7 @@ func usage(w io.Writer) {
   2. Скажите задачу.
   3. Нажмите ещё раз — или просто помолчите пять секунд.
   4. Текст появится в строке ввода. Проверьте его и нажмите Enter сами.
+     С флагом --submit он уходит сразу, без проверки.
 
 Первый запуск
   hey-claudex setup-api-key
@@ -136,6 +137,8 @@ func usage(w io.Writer) {
                              Назначить свою клавишу.
   hey-claudex listen --mode push
                              Говорить, пока клавиша удерживается.
+  hey-claude --submit        Отправлять сразу: замолчали или отпустили
+                             клавишу — текст ушёл.
   hey-claudex doctor --verify-api
                              Проверить доступ к OpenAI без отправки аудио.
 
@@ -150,10 +153,20 @@ func usage(w io.Writer) {
   а прежнее содержимое возвращает при остановке. Ваше оформление
   остаётся вашим.
 
+Отправка без проверки
+  По умолчанию Enter за вас никто не нажимает. Флаг --submit это меняет:
+  расшифровка уходит сразу, как только запись закончилась — по паузе или
+  по отпущенной клавише. Флаг не связан с режимом: удержание с отправкой
+  работает так же, как нажатие с отправкой.
+  Между вставкой и Enter выдерживается четверть секунды: приложение ещё
+  дочитывает вставленный текст, и Enter в том же всплеске событий оно
+  проглотит как часть вставки. Медленному приложению паузу можно
+  увеличить: --submit-delay 500ms.
+
 Безопасность
-  hey-claudex не нажимает Enter за вас и ничего не запускает: он
-  работает только в панели, которая уже открыта, и говорит только
-  в неё — без поиска активного окна и без нажатий за вас.
+  hey-claudex ничего не запускает: он работает только в панели, которая
+  уже открыта, и говорит только в неё — без поиска активного окна.
+  Пустую расшифровку не отправляет никогда.
 
 `)
 }
@@ -378,6 +391,8 @@ func run(args []string) int {
 	device := fs.String("device", record.DefaultDevice(), "audio input device")
 	busyFile := fs.String("busy-file", os.Getenv("HEY_CLAUDEX_BUSY_FILE"), "file to touch while recording, so voice-overs stay quiet")
 	onRecord := fs.String("on-record", os.Getenv("HEY_CLAUDEX_ON_RECORD"), "shell command run when recording starts")
+	submit := fs.Bool("submit", false, "press Enter after the transcription lands")
+	submitDelay := fs.Duration("submit-delay", tmux.DefaultSubmitDelay, "pause between the paste and Enter")
 	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-claudex keys")
 	tmuxTarget := fs.String("tmux-target", "hey-claudex:0.0", "tmux pane receiving transcriptions")
 	tmuxSession := fs.String("tmux-session", "hey-claudex", "tmux session owning the hey-claudex status line")
@@ -407,7 +422,11 @@ func run(args []string) int {
 
 	// The status line shows what is actually running in the target pane rather
 	// than what a flag claims, so it cannot drift from reality.
-	status, err := tmux.NewStatus(*tmuxSession, paneCommand(*tmuxTarget), *mode, *attached)
+	shown := *mode
+	if *submit {
+		shown += " auto"
+	}
+	status, err := tmux.NewStatus(*tmuxSession, paneCommand(*tmuxTarget), shown, *attached)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize tmux status:", err)
 		return 1
@@ -420,7 +439,7 @@ func run(args []string) int {
 		if err := status.Set(context.Background(), state); err != nil {
 			fmt.Fprintln(os.Stderr, "update tmux status:", err)
 		}
-	}, TmuxTarget: *tmuxTarget, Key: hotKey, BusyFile: *busyFile, OnRecord: *onRecord})
+	}, TmuxTarget: *tmuxTarget, Key: hotKey, BusyFile: *busyFile, OnRecord: *onRecord, Submit: *submit, SubmitDelay: *submitDelay})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
@@ -449,6 +468,8 @@ func listen(args []string) int {
 	device := fs.String("device", record.DefaultDevice(), "audio input device")
 	busyFile := fs.String("busy-file", os.Getenv("HEY_CLAUDEX_BUSY_FILE"), "file to touch while recording, so voice-overs stay quiet")
 	onRecord := fs.String("on-record", os.Getenv("HEY_CLAUDEX_ON_RECORD"), "shell command run when recording starts")
+	submit := fs.Bool("submit", false, "press Enter after the transcription lands")
+	submitDelay := fs.Duration("submit-delay", tmux.DefaultSubmitDelay, "pause between the paste and Enter")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -517,12 +538,17 @@ func listen(args []string) int {
 	command := []string{"new-window", "-d", "-t", session, "-n", voiceWindow, "-c", mustGetwd(), executable,
 		"run", "--attached", "--mode", *mode, "--key", hotKey.Name, "--tmux-target", pane, "--tmux-session", session,
 		"--silence", silence.String(), "--device", *device,
-		"--busy-file", *busyFile, "--on-record", *onRecord}
+		"--busy-file", *busyFile, "--on-record", *onRecord,
+		"--submit=" + strconv.FormatBool(*submit), "--submit-delay", submitDelay.String()}
 	if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
 		fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
 		return 1
 	}
-	fmt.Printf("Слушаю: %s (%s, пауза %s). Речь придёт в панель %s — проверьте текст и нажмите Enter сами.\n", hotKey.Name, *mode, *silence, pane)
+	if *submit {
+		fmt.Printf("Слушаю: %s (%s, пауза %s). Речь уйдёт в панель %s сразу, без проверки.\n", hotKey.Name, *mode, *silence, pane)
+	} else {
+		fmt.Printf("Слушаю: %s (%s, пауза %s). Речь придёт в панель %s — проверьте текст и нажмите Enter сами.\n", hotKey.Name, *mode, *silence, pane)
+	}
 	fmt.Println("Остановить: hey-claudex stop")
 	return 0
 }

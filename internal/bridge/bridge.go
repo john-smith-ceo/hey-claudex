@@ -44,6 +44,14 @@ type Config struct {
 	// OnRecord runs once when recording starts — to silence whatever is
 	// already speaking, which a file alone cannot do.
 	OnRecord string
+
+	// Submit presses Enter after the transcription lands. It is deliberately
+	// independent of Mode: how a recording is started and what happens to its
+	// result are separate questions, and the most useful combination — hold the
+	// key, release it, watch it go — needs both to be free.
+	Submit bool
+	// SubmitDelay overrides the pause before Enter for a slow application.
+	SubmitDelay time.Duration
 }
 
 type Bridge struct {
@@ -79,6 +87,9 @@ func New(config Config) (*Bridge, error) {
 	sender, err := tmux.New(config.TmuxTarget)
 	if err != nil {
 		return nil, err
+	}
+	if config.SubmitDelay > 0 {
+		sender.SubmitDelay = config.SubmitDelay
 	}
 	if err := sender.Check(context.Background()); err != nil {
 		return nil, err
@@ -180,7 +191,7 @@ func (b *Bridge) start(autoStop bool) {
 			return
 		}
 		deliverStart := time.Now()
-		if err := b.sender.Send(context.Background(), text); err != nil {
+		if err := b.sender.Send(context.Background(), text, b.config.Submit); err != nil {
 			b.fail("tmux delivery failed:", err)
 			return
 		}
@@ -189,7 +200,11 @@ func (b *Bridge) start(autoStop bool) {
 		// answered by feel; these three numbers answer it with facts.
 		fmt.Fprintf(b.config.Log, "timing: record %s, transcribe %s, deliver %s, chars %d\n",
 			round(recorded), round(transcribed), round(delivered), len(text))
-		fmt.Fprintf(b.config.Log, "transcription delivered to tmux %s; review it and press Enter yourself\n", b.sender.Target())
+		if b.config.Submit {
+			fmt.Fprintf(b.config.Log, "transcription delivered and submitted to tmux %s\n", b.sender.Target())
+		} else {
+			fmt.Fprintf(b.config.Log, "transcription delivered to tmux %s; review it and press Enter yourself\n", b.sender.Target())
+		}
 		b.state("pasted")
 		time.AfterFunc(1500*time.Millisecond, func() { b.state("idle") })
 	}()
