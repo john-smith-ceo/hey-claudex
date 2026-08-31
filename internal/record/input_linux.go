@@ -4,7 +4,7 @@ package record
 
 // PulseAudio is the practical capture path on desktop Linux: it follows the
 // system's default input, so a headset plugged in later is picked up without
-// reconfiguring hey-codex.
+// reconfiguring hey-claudex.
 func defaultDevice() string { return "default" }
 
 func inputArgs(device string) ([]string, error) {

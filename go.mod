@@ -1,3 +1,3 @@
-module github.com/johnsmith/hey-codex
+module github.com/john-smith-ceo/hey-claudex
 
 go 1.24.0

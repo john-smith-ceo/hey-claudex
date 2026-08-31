@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// While hey-codex borrows the status line, the session's own state is parked in
+// While hey-claudex borrows the status line, the session's own state is parked in
 // two user options. They live in tmux rather than in memory so that the value
 // survives the listener being killed and can still be restored afterwards.
 //
@@ -16,30 +16,33 @@ import (
 // value, an empty one overrides it with nothing. Restoring the wrong one would
 // silently wipe the clock and the pane title.
 const (
-	wasOption  = "@hey-codex-status-was"
-	baseOption = "@hey-codex-status-base"
+	wasOption  = "@hey-claudex-status-was"
+	baseOption = "@hey-claudex-status-base"
 )
 
-// Status owns the status line of one tmux session. In a session hey-codex
+// Status owns the status line of one tmux session. In a session hey-claudex
 // created it takes the whole line. In a session that already belonged to the
 // user it only appends its indicator to the existing status-right and puts the
 // original back on the way out: overwriting somebody's own status line is the
 // same mistake as launching them a second Codex.
 type Status struct {
 	session  string
-	flags    string
+	app      string
 	mode     string
 	attached bool
 }
 
-func NewStatus(session string, codexArgs []string, mode string, attached bool) (*Status, error) {
+func NewStatus(session, app, mode string, attached bool) (*Status, error) {
 	if strings.TrimSpace(session) == "" {
 		return nil, fmt.Errorf("tmux session is empty")
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil, fmt.Errorf("tmux not found")
 	}
-	return &Status{session: session, flags: cleanStatusText(strings.Join(codexArgs, " ")), mode: mode, attached: attached}, nil
+	if strings.TrimSpace(app) == "" {
+		app = "pane"
+	}
+	return &Status{session: session, app: cleanStatusText(app), mode: mode, attached: attached}, nil
 }
 
 func (s *Status) Configure(ctx context.Context) error {
@@ -99,17 +102,14 @@ func (s *Status) Set(ctx context.Context, state string) error {
 		if err != nil {
 			return err
 		}
-		message := "#[default]" + indicatorWith(state, "#[default]") + "hey-codex " + s.label(state)
+		message := "#[default]" + indicatorWith(state, "#[default]") + "hey-claudex " + s.label(state)
 		if strings.TrimSpace(base) != "" {
 			message = base + " " + message
 		}
 		return s.set(ctx, "status-right", message)
 	}
 	message := "<speech-to-text " + indicator(state) + s.label(state) + ">"
-	left := "#[fg=#17324D,bold]hey-codex#[fg=#17324D]: codex"
-	if s.flags != "" {
-		left += " #[fg=#315B82]<" + s.flags + ">"
-	}
+	left := "#[fg=#17324D,bold]hey-claudex#[fg=#17324D]: " + s.app
 	left += " #[fg=#315B82]" + message
 	return s.set(ctx, "status-left", left)
 }
@@ -120,31 +120,34 @@ func (s *Status) Restore(ctx context.Context) error {
 	if !s.attached {
 		return nil
 	}
-	return Restore(ctx, s.session)
+	_, err := Restore(ctx, s.session)
+	return err
 }
 
-// Restore is also reachable without a Status, so that `hey-codex stop` can put
-// the line back after killing a listener that had no chance to clean up.
-func Restore(ctx context.Context, session string) error {
+// Restore is also reachable without a Status, so that `hey-claudex stop` can put
+// the line back after killing a listener that had no chance to clean up. It
+// reports whether there was anything to restore, which lets stop tell "cleaned
+// up after a dead listener" from "nothing was running here".
+func Restore(ctx context.Context, session string) (bool, error) {
 	was, err := get(ctx, session, wasOption)
 	if err != nil || was == "" {
-		return err
+		return false, err
 	}
 	if was == "set" {
 		base, err := get(ctx, session, baseOption)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := setOption(ctx, session, "status-right", base); err != nil {
-			return err
+			return false, err
 		}
 	} else if err := unsetOption(ctx, session, "status-right"); err != nil {
-		return err
+		return false, err
 	}
 	if err := unsetOption(ctx, session, wasOption); err != nil {
-		return err
+		return false, err
 	}
-	return unsetOption(ctx, session, baseOption)
+	return true, unsetOption(ctx, session, baseOption)
 }
 
 // sessionOptionIsSet reports whether the option is set on the session itself

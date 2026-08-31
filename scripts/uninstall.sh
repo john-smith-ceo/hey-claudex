@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-hey-codex uninstall "$@"
+hey-claudex uninstall "$@"

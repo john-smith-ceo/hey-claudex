@@ -36,7 +36,7 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return "", errors.New("ffmpeg not found; install it (macOS: brew install ffmpeg, Debian: apt install ffmpeg)")
 	}
-	file, err := os.CreateTemp("", "hey-codex-*.wav")
+	file, err := os.CreateTemp("", "hey-claudex-*.wav")
 	if err != nil {
 		return "", err
 	}

@@ -1,19 +1,19 @@
 .PHONY: build test install uninstall run release-check
 
 build:
-	go build -o bin/hey-codex ./cmd/hey-codex
+	go build -o bin/hey-claudex ./cmd/hey-claudex
 
 test:
 	go test ./...
 
 install: build
-	./bin/hey-codex install
+	./bin/hey-claudex install
 
 uninstall:
-	hey-codex uninstall
+	hey-claudex uninstall
 
 run:
-	hey-codex
+	hey-claudex
 
 release-check: test build
 	git diff --check

@@ -15,34 +15,64 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnsmith/hey-codex/internal/bridge"
-	"github.com/johnsmith/hey-codex/internal/hotkey"
-	"github.com/johnsmith/hey-codex/internal/record"
-	"github.com/johnsmith/hey-codex/internal/secret"
-	"github.com/johnsmith/hey-codex/internal/tmux"
-	"github.com/johnsmith/hey-codex/internal/transcribe"
+	"github.com/john-smith-ceo/hey-claudex/internal/bridge"
+	"github.com/john-smith-ceo/hey-claudex/internal/hotkey"
+	"github.com/john-smith-ceo/hey-claudex/internal/record"
+	"github.com/john-smith-ceo/hey-claudex/internal/secret"
+	"github.com/john-smith-ceo/hey-claudex/internal/tmux"
+	"github.com/john-smith-ceo/hey-claudex/internal/transcribe"
 )
 
-const keychainService = "hey-codex.openai-api-key"
+const keychainService = "hey-claudex.openai-api-key"
 
 // voiceWindow is the hidden tmux window the listener runs in.
-const voiceWindow = "hey-codex-voice"
+const voiceWindow = "hey-claudex-voice"
+
+// installNames are the names the tool is reachable under.
+var installNames = []string{"hey-claudex", "hey-claude", "hey-codex"}
+
+// expectedApp reads the name the binary was called by. hey-claude expects to
+// speak into Claude Code and hey-codex into Codex; the check exists so that a
+// transcription never lands in the wrong pane. Called by any other name, the
+// tool speaks into whatever is there.
+func expectedApp() string {
+	name := strings.ToLower(filepath.Base(os.Args[0]))
+	switch {
+	case strings.Contains(name, "claudex"):
+		return ""
+	case strings.Contains(name, "codex"):
+		return "codex"
+	case strings.Contains(name, "claude"):
+		return "claude"
+	}
+	return ""
+}
+
+// isOwnName reports whether the command is hey-claudex under any of its names.
+func isOwnName(command string) bool {
+	for _, name := range installNames {
+		if command == name {
+			return true
+		}
+	}
+	return false
+}
+
+// paneCommand reports the program currently running in a pane.
+func paneCommand(pane string) string {
+	output, err := exec.Command("tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
 
 func main() {
 	if len(os.Args) < 2 {
-		// Inside tmux the user already has a session and very likely a Codex
-		// in it; creating a second one would be the wrong favour.
-		if insideTmux() {
-			os.Exit(listen(nil))
-		}
-		os.Exit(start(nil))
+		os.Exit(listen(nil))
 	}
 
 	switch os.Args[1] {
-	case "--":
-		// Everything after `--` belongs to Codex. This keeps hey-codex's
-		// options separate from Codex's and avoids shell parsing entirely.
-		os.Exit(start(os.Args[1:]))
 	case "listen", "join":
 		os.Exit(listen(os.Args[2:]))
 	case "keys":
@@ -53,8 +83,6 @@ func main() {
 		os.Exit(setupAPIKey(os.Args[2:], os.Stdin, os.Stdout))
 	case "install":
 		os.Exit(install(os.Stdout))
-	case "start", "tmux":
-		os.Exit(start(os.Args[2:]))
 	case "stop":
 		os.Exit(stop(os.Args[2:]))
 	case "uninstall":
@@ -71,65 +99,55 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `hey-codex — голосовой ввод для Codex
+	fmt.Fprint(w, `hey-claudex — голосовой ввод в панель, где вы уже работаете
 
 Самый простой старт
+  hey-claude
+      Включит голосовой ввод в текущей панели tmux, где идёт Claude Code.
   hey-codex
-      Если вы уже в tmux — подключит голосовой ввод к текущей панели.
-      Если нет — откроет Codex в своей сессии и включит голосовой ввод.
-      Больше ничего помнить не нужно.
+      То же самое для панели с Codex.
 
 Как говорить
-  1. Нажмите правый Option один раз (клавиша меняется флагом --key).
+  1. Нажмите правый Alt (на маке — правый Option) один раз.
   2. Скажите задачу.
-  3. Нажмите правый Option ещё раз — или просто помолчите 5 секунд.
-  4. Текст появится в Codex. Проверьте его и нажмите Enter сами.
+  3. Нажмите ещё раз — или просто помолчите пять секунд.
+  4. Текст появится в строке ввода. Проверьте его и нажмите Enter сами.
 
 Первый запуск
-  hey-codex setup-api-key
+  hey-claudex setup-api-key
       Сохранит ваш OpenAI API key: на macOS — в Keychain, на Linux —
-      в ~/.config/hey-codex, доступный только вам.
-  hey-codex doctor
-      Проверит микрофон, tmux, ffmpeg и ключ.
+      в ~/.config/hey-claudex, доступный только вам.
+  hey-claudex doctor
+      Проверит микрофон, tmux, ffmpeg, горячую клавишу и ключ.
 
 Полезные команды
-  hey-codex                 Открыть Codex с голосовым вводом.
-  hey-codex start           То же самое.
-  hey-codex listen          Подключить голос к панели, из которой вызвали.
-  hey-codex keys            Показать клавиши, которые можно назначить.
-  hey-codex start --key Alt_R
-                            Назначить свою клавишу вместо правого Option.
-  hey-codex start --mode push
-                            Говорите, пока удерживаете правый Option.
-  hey-codex -- --approve-for-me
-                            Запустить Codex с его собственным флагом.
-  hey-codex stop            Остановить голосовой ввод. Вашу сессию tmux
-                            не трогает: убирает только своё окно и
-                            возвращает строку состояния.
-  hey-codex doctor          Проверить, всё ли готово.
-  hey-codex doctor --verify-api
-                            Проверить доступ к OpenAI без отправки аудио.
-  hey-codex uninstall       Убрать локальную dev-установку.
-  hey-codex uninstall --purge-key
-                            Убрать также ключ из Keychain.
+  hey-claude, hey-codex      Включить голос в текущей панели.
+  hey-claudex listen         То же, но без проверки, что за приложение
+                             в панели.
+  hey-claudex stop           Остановить голосовой ввод.
+  hey-claudex keys           Показать клавиши, которые можно назначить.
+  hey-claudex listen --key Shift_L
+                             Назначить свою клавишу.
+  hey-claudex listen --mode push
+                             Говорить, пока клавиша удерживается.
+  hey-claudex doctor --verify-api
+                             Проверить доступ к OpenAI без отправки аудио.
+
+Имена вызова
+  hey-claude ждёт в панели Claude Code, hey-codex — Codex. Если там
+  работает другое, инструмент откажется и скажет, что именно видит:
+  текст, ушедший не в то окно, хуже неуслышанного. Обойти — флаг --any.
 
 Строка tmux
   Состояние видно внизу терминала: mode:tap, rec…, transcribe…, done
-  или error.
-  В своей сессии hey-codex занимает строку целиком. В вашей — только
-  дописывает значок справа, а прежнее содержимое возвращает при
-  остановке. Ваше оформление остаётся вашим.
+  или error. В вашей сессии hey-claudex только дописывает значок справа,
+  а прежнее содержимое возвращает при остановке. Ваше оформление
+  остаётся вашим.
 
 Безопасность
-  hey-codex не нажимает Enter за вас. Голос доставляется только в вашу
-  собственную сессию Codex, а не в случайное активное окно.
-
-Флаги Codex
-  После -- можно передать любые флаги самого Codex:
-    hey-codex -- --approve-for-me
-    hey-codex -- --model gpt-5.4
-  Это действует при создании новой сессии. Если сессия уже идёт, сначала
-  завершите её: hey-codex stop
+  hey-claudex не нажимает Enter за вас и ничего не запускает: он
+  работает только в панели, которая уже открыта, и говорит только
+  в неё — без поиска активного окна и без нажатий за вас.
 
 `)
 }
@@ -199,7 +217,7 @@ func doctor(args []string, w io.Writer) int {
 	} else {
 		fmt.Fprintf(w, "ok   hotkey     %s available\n", hotKey.Name)
 	}
-	key := os.Getenv("HEY_CODEX_OPENAI_API_KEY")
+	key := os.Getenv("HEY_CLAUDEX_OPENAI_API_KEY")
 	if key == "" {
 		key, _ = secret.Load(keychainService)
 	}
@@ -214,13 +232,13 @@ func doctor(args []string, w io.Writer) int {
 			}
 		}
 	} else {
-		fmt.Fprintln(w, "fail OpenAI API key missing (run: hey-codex setup-api-key)")
+		fmt.Fprintln(w, "fail OpenAI API key missing (run: hey-claudex setup-api-key)")
 		failures++
 	}
 	if runtime.GOOS == "darwin" {
 		fmt.Fprintln(w, "note grant Microphone and Accessibility permission to the launcher application before run")
 	} else {
-		fmt.Fprintln(w, "note hey-codex needs an X11 session; Wayland is not supported yet")
+		fmt.Fprintln(w, "note hey-claudex needs an X11 session; Wayland is not supported yet")
 	}
 	if failures > 0 {
 		return 1
@@ -301,9 +319,11 @@ var dotenvKeyNames = map[string]bool{
 	"OPEN_AI_API_KEY": true,
 }
 
+// install links the built binary under all three names. The aliases are not
+// decoration: the name states which assistant the pane is expected to run.
 func install(out io.Writer) int {
 	if _, err := exec.LookPath("tmux"); err != nil {
-		fmt.Fprintln(os.Stderr, "tmux is required; install it first: brew install tmux")
+		fmt.Fprintln(os.Stderr, "tmux is required; install it first")
 		return 1
 	}
 	executable, err := os.Executable()
@@ -317,29 +337,31 @@ func install(out io.Writer) int {
 		return 1
 	}
 	targetDir := filepath.Join(home, ".local", "bin")
-	target := filepath.Join(targetDir, "hey-codex")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "create install directory:", err)
 		return 1
 	}
-	if info, err := os.Lstat(target); err == nil {
-		if info.Mode()&os.ModeSymlink == 0 {
-			fmt.Fprintf(os.Stderr, "refusing to overwrite non-symlink %s\n", target)
+	for _, name := range installNames {
+		target := filepath.Join(targetDir, name)
+		if info, err := os.Lstat(target); err == nil {
+			if info.Mode()&os.ModeSymlink == 0 {
+				fmt.Fprintf(os.Stderr, "refusing to overwrite non-symlink %s\n", target)
+				return 1
+			}
+			current, err := filepath.EvalSymlinks(target)
+			if err != nil || current != executable {
+				fmt.Fprintf(os.Stderr, "refusing to replace existing link %s\n", target)
+				return 1
+			}
+			fmt.Fprintf(out, "already installed: %s\n", target)
+			continue
+		}
+		if err := os.Symlink(executable, target); err != nil {
+			fmt.Fprintln(os.Stderr, "install symlink:", err)
 			return 1
 		}
-		current, err := filepath.EvalSymlinks(target)
-		if err != nil || current != executable {
-			fmt.Fprintf(os.Stderr, "refusing to replace existing link %s\n", target)
-			return 1
-		}
-		fmt.Fprintf(out, "already installed: %s\n", target)
-		return 0
+		fmt.Fprintf(out, "installed: %s -> %s\n", target, executable)
 	}
-	if err := os.Symlink(executable, target); err != nil {
-		fmt.Fprintln(os.Stderr, "install symlink:", err)
-		return 1
-	}
-	fmt.Fprintf(out, "installed: %s -> %s\n", target, executable)
 	return 0
 }
 
@@ -348,10 +370,10 @@ func run(args []string) int {
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
 	silence := fs.Duration("silence", 5*time.Second, "tap-mode silence timeout")
 	device := fs.String("device", record.DefaultDevice(), "audio input device")
-	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-codex keys")
-	tmuxTarget := fs.String("tmux-target", "hey-codex:0.0", "tmux pane receiving transcriptions")
-	tmuxSession := fs.String("tmux-session", "hey-codex", "tmux session owning the hey-codex status line")
-	codexFlags := fs.String("codex-flags", "", "Codex arguments to display in the tmux status line")
+	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-claudex keys")
+	tmuxTarget := fs.String("tmux-target", "hey-claudex:0.0", "tmux pane receiving transcriptions")
+	tmuxSession := fs.String("tmux-session", "hey-claudex", "tmux session owning the hey-claudex status line")
+
 	attached := fs.Bool("attached", false, "the session belongs to the user: borrow the status line instead of taking it")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -375,7 +397,9 @@ func run(args []string) int {
 		return 1
 	}
 
-	status, err := tmux.NewStatus(*tmuxSession, strings.Fields(*codexFlags), *mode, *attached)
+	// The status line shows what is actually running in the target pane rather
+	// than what a flag claims, so it cannot drift from reality.
+	status, err := tmux.NewStatus(*tmuxSession, paneCommand(*tmuxTarget), *mode, *attached)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize tmux status:", err)
 		return 1
@@ -393,7 +417,7 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "hey-codex ready: %s (%s mode), target %s; Ctrl+C stops the listener\n", hotKey.Name, *mode, *tmuxTarget)
+	fmt.Fprintf(os.Stderr, "hey-claudex ready: %s (%s mode), target %s; Ctrl+C stops the listener\n", hotKey.Name, *mode, *tmuxTarget)
 	runErr := app.Run(context.Background())
 	if err := status.Restore(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "restore tmux status:", err)
@@ -410,13 +434,15 @@ func run(args []string) int {
 func listen(args []string) int {
 	fs := flag.NewFlagSet("listen", flag.ContinueOnError)
 	mode := fs.String("mode", "tap", "voice mode: tap or push")
-	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-codex keys")
+	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-claudex keys")
 	target := fs.String("target", "", "tmux pane receiving transcriptions (default: the pane you run this from)")
+	any := fs.Bool("any", false, "speak into the pane whatever runs in it")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if !insideTmux() {
-		fmt.Fprintln(os.Stderr, "hey-codex listen works inside tmux; outside it run: hey-codex")
+		fmt.Fprintln(os.Stderr, "hey-claudex speaks into a pane you are already working in, so it needs tmux.")
+		fmt.Fprintln(os.Stderr, "open tmux, start your assistant there, and call this from that pane.")
 		return 2
 	}
 	if *mode != "tap" && *mode != "push" {
@@ -444,18 +470,36 @@ func listen(args []string) int {
 		fmt.Fprintln(os.Stderr, "cannot tell which pane to speak into; pass --target")
 		return 1
 	}
+	// The name the tool was called by states the intent. Speaking into a pane
+	// running something else is almost always a mistake, and a transcription in
+	// the wrong window is worse than no transcription.
+	if want := expectedApp(); want != "" && !*any {
+		running := paneCommand(pane)
+		if isOwnName(running) {
+			// The tool itself is the foreground process, which means the pane
+			// holds a shell rather than an assistant.
+			fmt.Fprintf(os.Stderr, "no %s is running in this pane.\n", want)
+			fmt.Fprintf(os.Stderr, "call %s from the pane where %s works, or repeat with --any to speak into this one.\n", filepath.Base(os.Args[0]), want)
+			return 1
+		}
+		if running != "" && running != want {
+			fmt.Fprintf(os.Stderr, "%s expects %s in this pane, but %s is running there.\n", filepath.Base(os.Args[0]), want, running)
+			fmt.Fprintf(os.Stderr, "call it from a %s pane, or repeat with --any to speak into this one anyway.\n", want)
+			return 1
+		}
+	}
 	session, err := currentSession()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if tmuxWindowExists(session, voiceWindow) {
-		fmt.Fprintf(os.Stderr, "hey-codex is already listening in %q; stop it with: hey-codex stop\n", session)
+		fmt.Fprintf(os.Stderr, "hey-claudex is already listening in %q; stop it with: hey-claudex stop\n", session)
 		return 1
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "locate hey-codex executable:", err)
+		fmt.Fprintln(os.Stderr, "locate hey-claudex executable:", err)
 		return 1
 	}
 	command := []string{"new-window", "-d", "-t", session, "-n", voiceWindow, "-c", mustGetwd(), executable,
@@ -465,123 +509,57 @@ func listen(args []string) int {
 		return 1
 	}
 	fmt.Printf("Слушаю: %s (%s). Речь придёт в панель %s — проверьте текст и нажмите Enter сами.\n", hotKey.Name, *mode, pane)
-	fmt.Println("Остановить: hey-codex stop")
+	fmt.Println("Остановить: hey-claudex stop")
 	return 0
 }
 
-func start(args []string) int {
-	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	session := fs.String("session", "hey-codex", "tmux session name")
-	mode := fs.String("mode", "tap", "voice mode: tap or push")
-	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-codex keys")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	hotKey, err := hotkey.Lookup(*keyName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
-	}
-	if err := hotkey.Validate(hotKey); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
-	}
-	if *mode == "push" && !hotKey.SupportsPush() {
-		fmt.Fprintf(os.Stderr, "%s is pressed while typing, so hold-to-talk is impossible for it; use --mode tap\n", hotKey.Name)
-		return 2
-	}
-	if insideTmux() {
-		fmt.Fprintln(os.Stderr, "you are already inside tmux, and hey-codex would start a second Codex in a session it cannot attach to.")
-		fmt.Fprintln(os.Stderr, "run this instead: hey-codex listen")
-		return 2
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		fmt.Fprintln(os.Stderr, "tmux not found")
-		return 1
-	}
-	if *mode != "tap" && *mode != "push" {
-		fmt.Fprintln(os.Stderr, "--mode must be tap or push")
-		return 2
-	}
-	codexArgs := fs.Args()
-	_, sessionErr := exec.Command("tmux", "has-session", "-t", *session).CombinedOutput()
-	if sessionErr == nil && len(codexArgs) > 0 {
-		fmt.Fprintf(os.Stderr, "Codex flags apply only when creating a session; %q is already running. Run: hey-codex stop\n", *session)
-		return 1
-	}
-	if sessionErr != nil {
-		command := append([]string{"new-session", "-d", "-s", *session, "-n", "codex", "-c", mustGetwd(), "codex"}, codexArgs...)
-		if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
-			fmt.Fprintln(os.Stderr, "start tmux Codex session:", strings.TrimSpace(string(output)))
-			return 1
-		}
-	}
-	status, err := tmux.NewStatus(*session, codexArgs, *mode, false)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "initialize tmux status:", err)
-		return 1
-	}
-	if err := status.Configure(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "configure tmux status:", err)
-		return 1
-	}
-	if !tmuxWindowExists(*session, voiceWindow) {
-		executable, err := os.Executable()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "locate hey-codex executable:", err)
-			return 1
-		}
-		target := *session + ":0.0"
-		command := []string{"new-window", "-d", "-t", *session, "-n", voiceWindow, "-c", mustGetwd(), executable, "run", "--mode", *mode, "--key", hotKey.Name, "--tmux-target", target, "--tmux-session", *session, "--codex-flags", strings.Join(codexArgs, " ")}
-		if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
-			fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
-			return 1
-		}
-	}
-	attach := exec.Command("tmux", "attach-session", "-t", *session)
-	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := attach.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "attach tmux:", err)
-		return 1
-	}
-	return 0
-}
-
-// stop removes only what hey-codex started. A session that belonged to the
-// user loses its listener window and gets its status line back; the session is
-// never killed, because killing it would take the user's work with it.
+// stop removes the listener and puts the borrowed status line back. The user's
+// session is never killed: hey-claudex did not create it and has no business
+// taking it down.
 func stop(args []string) int {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
-	session := fs.String("session", "", "tmux session hey-codex created (default: hey-codex)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *session == "" && insideTmux() {
-		if current, err := currentSession(); err == nil && tmuxWindowExists(current, voiceWindow) {
-			if output, err := exec.Command("tmux", "kill-window", "-t", current+":"+voiceWindow).CombinedOutput(); err != nil {
-				fmt.Fprintln(os.Stderr, "stop listener:", strings.TrimSpace(string(output)))
-				return 1
-			}
-			if err := tmux.Restore(context.Background(), current); err != nil {
-				fmt.Fprintln(os.Stderr, "restore tmux status:", err)
-			}
-			fmt.Printf("Слушатель остановлен, строка состояния сессии %q возвращена.\n", current)
-			return 0
+	if !insideTmux() {
+		fmt.Fprintln(os.Stderr, "run this from the tmux session where hey-claudex is listening")
+		return 2
+	}
+	current, err := currentSession()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	// The window may already be gone — a crash, or somebody closing it by hand.
+	// The borrowed status line still has to be given back, so cleaning up runs
+	// either way.
+	if tmuxWindowExists(current, voiceWindow) {
+		if output, err := exec.Command("tmux", "kill-window", "-t", current+":"+voiceWindow).CombinedOutput(); err != nil {
+			fmt.Fprintln(os.Stderr, "stop listener:", strings.TrimSpace(string(output)))
+			return 1
 		}
+		restored, err := tmux.Restore(context.Background(), current)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "restore tmux status:", err)
+		}
+		if restored {
+			fmt.Printf("Слушатель остановлен, строка состояния сессии %q возвращена.\n", current)
+		} else {
+			fmt.Println("Слушатель остановлен.")
+		}
+		return 0
 	}
-	owned := *session
-	if owned == "" {
-		owned = "hey-codex"
-	}
-	if _, err := exec.Command("tmux", "has-session", "-t", owned).CombinedOutput(); err != nil {
-		fmt.Fprintln(os.Stderr, "nothing to stop: no hey-codex listener here and no", owned, "session")
+	restored, err := tmux.Restore(context.Background(), current)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "restore tmux status:", err)
 		return 1
 	}
-	if output, err := exec.Command("tmux", "kill-session", "-t", owned).CombinedOutput(); err != nil {
-		fmt.Fprintln(os.Stderr, "stop hey-codex:", strings.TrimSpace(string(output)))
-		return 1
+	if restored {
+		fmt.Printf("Слушателя уже не было, но строка состояния сессии %q осталась занятой — вернул.\n", current)
+		return 0
 	}
-	return 0
+	fmt.Fprintf(os.Stderr, "nothing to stop: hey-claudex is not listening in %q\n", current)
+	return 1
 }
 
 func insideTmux() bool { return strings.TrimSpace(os.Getenv("TMUX")) != "" }
@@ -617,11 +595,13 @@ func uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "locate home directory:", err)
 		return 1
 	}
-	target := filepath.Join(home, ".local", "bin", "hey-codex")
-	if current, err := filepath.EvalSymlinks(target); err == nil && current == executable {
-		if err := os.Remove(target); err != nil {
-			fmt.Fprintln(os.Stderr, "remove developer symlink:", err)
-			return 1
+	for _, name := range installNames {
+		target := filepath.Join(home, ".local", "bin", name)
+		if current, err := filepath.EvalSymlinks(target); err == nil && current == executable {
+			if err := os.Remove(target); err != nil {
+				fmt.Fprintln(os.Stderr, "remove developer symlink:", err)
+				return 1
+			}
 		}
 	}
 	if *purgeKey {
@@ -634,14 +614,14 @@ func uninstall(args []string) int {
 }
 
 func openAIKey() (string, error) {
-	if key := strings.TrimSpace(os.Getenv("HEY_CODEX_OPENAI_API_KEY")); key != "" {
+	if key := strings.TrimSpace(os.Getenv("HEY_CLAUDEX_OPENAI_API_KEY")); key != "" {
 		return key, nil
 	}
 	key, err := secret.Load(keychainService)
 	if err == nil && strings.TrimSpace(key) != "" {
 		return key, nil
 	}
-	return "", errors.New("OpenAI API key missing; run hey-codex setup-api-key")
+	return "", errors.New("OpenAI API key missing; run hey-claudex setup-api-key")
 }
 
 func tmuxWindowExists(session, name string) bool {

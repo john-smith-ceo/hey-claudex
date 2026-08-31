@@ -96,7 +96,7 @@ func GlobalSupported() bool { return os.Getenv("DISPLAY") != "" }
 // New returns a listener for the configured key.
 func New(key Key) (Listener, error) {
 	if !GlobalSupported() {
-		return nil, errors.New("no X11 display; hey-codex needs an X11 session (Wayland is not supported yet)")
+		return nil, errors.New("no X11 display; hey-claudex needs an X11 session (Wayland is not supported yet)")
 	}
 	keycode := int(C.lookupKeycode(C.ulong(key.x11Keysym)))
 	if keycode <= 0 {

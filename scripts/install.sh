@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-repo=${HEY_CODEX_REPOSITORY:-john-smith-ceo/hey-codex}
-version=${HEY_CODEX_VERSION:-latest}
-install_dir=${HEY_CODEX_INSTALL_DIR:-"$HOME/.local/bin"}
+repo=${HEY_CLAUDEX_REPOSITORY:-john-smith-ceo/hey-claudex}
+version=${HEY_CLAUDEX_VERSION:-latest}
+install_dir=${HEY_CLAUDEX_INSTALL_DIR:-"$HOME/.local/bin"}
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "hey-codex installer requires $1" >&2
+    echo "hey-claudex installer requires $1" >&2
     exit 1
   fi
 }
@@ -17,7 +17,7 @@ need tmux
 need ffmpeg
 
 if [ "$(uname -s)" != Darwin ]; then
-  echo "hey-codex currently supports macOS only" >&2
+  echo "hey-claudex currently supports macOS only" >&2
   exit 1
 fi
 platform=darwin
@@ -28,7 +28,7 @@ case "$(uname -m)" in
   *) echo "unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-asset="hey-codex_${platform}_${arch}"
+asset="hey-claudex_${platform}_${arch}"
 if [ "$version" = latest ]; then
   base="https://github.com/$repo/releases/latest/download"
 else
@@ -53,6 +53,6 @@ else
 fi
 
 mkdir -p "$install_dir"
-install -m 0755 "$workdir/$asset" "$install_dir/hey-codex"
-echo "installed $install_dir/hey-codex"
-echo "ensure $install_dir is on PATH, then run: hey-codex doctor"
+install -m 0755 "$workdir/$asset" "$install_dir/hey-claudex"
+echo "installed $install_dir/hey-claudex"
+echo "ensure $install_dir is on PATH, then run: hey-claudex doctor"

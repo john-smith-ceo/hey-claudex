@@ -82,7 +82,7 @@ func GlobalSupported() bool { return true }
 // New returns a listener for the configured key.
 func New(key Key) (Listener, error) {
 	if !key.AvailableOnDarwin() {
-		return nil, fmt.Errorf("no Apple keyboard has a %s key; run: hey-codex keys", key.Name)
+		return nil, fmt.Errorf("no Apple keyboard has a %s key; run: hey-claudex keys", key.Name)
 	}
 	return darwinTap{key: key}, nil
 }

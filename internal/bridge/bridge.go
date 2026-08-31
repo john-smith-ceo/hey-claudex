@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/johnsmith/hey-codex/internal/hotkey"
-	"github.com/johnsmith/hey-codex/internal/record"
-	"github.com/johnsmith/hey-codex/internal/tmux"
-	"github.com/johnsmith/hey-codex/internal/transcribe"
+	"github.com/john-smith-ceo/hey-claudex/internal/hotkey"
+	"github.com/john-smith-ceo/hey-claudex/internal/record"
+	"github.com/john-smith-ceo/hey-claudex/internal/tmux"
+	"github.com/john-smith-ceo/hey-claudex/internal/transcribe"
 )
 
 type Mode string

@@ -13,4 +13,4 @@ jobs:
         with:
           go-version: stable
       - run: go test ./...
-      - run: go build -o bin/hey-codex ./cmd/hey-codex
+      - run: go build -o bin/hey-claudex ./cmd/hey-claudex
