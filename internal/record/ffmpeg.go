@@ -34,7 +34,7 @@ var silenceStart = regexp.MustCompile(`silence_start:`)
 
 func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return "", errors.New("ffmpeg not found; install it with: brew install ffmpeg")
+		return "", errors.New("ffmpeg not found; install it (macOS: brew install ffmpeg, Debian: apt install ffmpeg)")
 	}
 	file, err := os.CreateTemp("", "hey-codex-*.wav")
 	if err != nil {

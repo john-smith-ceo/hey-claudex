@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package hotkey
 
@@ -11,7 +11,8 @@ type unsupported struct{}
 
 func GlobalSupported() bool { return false }
 
-func NewRightOption() Listener { return unsupported{} }
+func New(Key) (Listener, error) { return unsupported{}, nil }
+
 func (unsupported) Start(context.Context) (<-chan Event, error) {
-	return nil, errors.New("Right Option hotkey is supported only on macOS")
+	return nil, errors.New("global hotkeys are supported only on macOS and Linux")
 }

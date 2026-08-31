@@ -16,7 +16,7 @@ import (
 
 var endpoint = "https://api.openai.com/v1/audio/transcriptions"
 
-const modelEndpoint = "https://api.openai.com/v1/models/gpt-transcribe"
+var listEndpoint = "https://api.openai.com/v1/models"
 
 const model = "gpt-transcribe"
 
@@ -30,6 +30,12 @@ func endpointForTest(value string) func() {
 	return func() { endpoint = old }
 }
 
+func listEndpointForTest(value string) func() {
+	old := listEndpoint
+	listEndpoint = value
+	return func() { listEndpoint = old }
+}
+
 type OpenAI struct {
 	apiKey string
 	http   *http.Client
@@ -38,8 +44,12 @@ type OpenAI struct {
 func NewOpenAI(apiKey string) *OpenAI { return &OpenAI{apiKey: apiKey, http: http.DefaultClient} }
 
 // Verify checks authentication and model visibility without uploading audio.
+//
+// The model is looked up in the list rather than fetched directly: retrieving
+// gpt-transcribe by name answers 500, so a direct fetch would report a working
+// key as broken.
 func Verify(ctx context.Context, apiKey string) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, modelEndpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, listEndpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -52,7 +62,24 @@ func Verify(ctx context.Context, apiKey string) error {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("OpenAI returned %s", response.Status)
 	}
-	return nil
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	var listed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &listed); err != nil {
+		return err
+	}
+	for _, entry := range listed.Data {
+		if entry.ID == model {
+			return nil
+		}
+	}
+	return fmt.Errorf("this key cannot see the %s model", model)
 }
 
 func (c *OpenAI) Transcribe(ctx context.Context, filename string) (string, error) {

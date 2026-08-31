@@ -26,3 +26,6 @@ func Save(service, value string) error {
 	}
 	return exec.Command("security", "add-generic-password", "-U", "-s", service, "-a", "hey-codex", "-w", value).Run()
 }
+
+// Location reports where the key is kept, for messages shown to the user.
+func Location(string) string { return "macOS login Keychain" }

@@ -32,6 +32,7 @@ type Config struct {
 	Log        io.Writer
 	State      func(string)
 	TmuxTarget string
+	Key        hotkey.Key
 }
 
 type Bridge struct {
@@ -57,6 +58,13 @@ func New(config Config) (*Bridge, error) {
 	if config.Silence <= 0 {
 		return nil, errors.New("silence timeout must be positive")
 	}
+	if config.Mode == Push && !config.Key.SupportsPush() {
+		return nil, fmt.Errorf("%s is used while typing, so hold-to-talk cannot be told apart from ordinary use; run it with --mode tap", config.Key.Name)
+	}
+	listener, err := hotkey.New(config.Key)
+	if err != nil {
+		return nil, err
+	}
 	sender, err := tmux.New(config.TmuxTarget)
 	if err != nil {
 		return nil, err
@@ -66,7 +74,7 @@ func New(config Config) (*Bridge, error) {
 	}
 	return &Bridge{
 		config:     config,
-		hotkey:     hotkey.NewRightOption(),
+		hotkey:     listener,
 		recorder:   record.NewFFmpeg(config.Device, config.Silence),
 		transcribe: transcribe.NewOpenAI(config.APIKey),
 		sender:     sender,
@@ -138,8 +146,7 @@ func (b *Bridge) start(autoStop bool) {
 		b.mu.Unlock()
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				fmt.Fprintln(b.config.Log, "recording failed:", err)
-				b.state("error")
+				b.fail("recording failed:", err)
 			}
 			return
 		}
@@ -152,13 +159,11 @@ func (b *Bridge) start(autoStop bool) {
 		b.state("transcribing")
 		text, err := b.transcribe.Transcribe(context.Background(), file)
 		if err != nil {
-			fmt.Fprintln(b.config.Log, "transcription failed:", err)
-			b.state("error")
+			b.fail("transcription failed:", err)
 			return
 		}
 		if err := b.sender.Send(context.Background(), text); err != nil {
-			fmt.Fprintln(b.config.Log, "tmux delivery failed:", err)
-			b.state("error")
+			b.fail("tmux delivery failed:", err)
 			return
 		}
 		fmt.Fprintf(b.config.Log, "transcription delivered to tmux %s; review it and press Enter yourself\n", b.sender.Target())
@@ -180,6 +185,14 @@ func (b *Bridge) stop(transcribe bool) {
 		b.session++
 		b.recording, b.cancel = false, nil
 	}
+}
+
+// fail reports a failure and then lets the indicator settle back to idle. A
+// status line borrowed from the user must not keep a red dot forever.
+func (b *Bridge) fail(message string, err error) {
+	fmt.Fprintln(b.config.Log, message, err)
+	b.state("error")
+	time.AfterFunc(4*time.Second, func() { b.state("idle") })
 }
 
 func (b *Bridge) state(value string) {
