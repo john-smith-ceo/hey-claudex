@@ -86,7 +86,7 @@ func (r *FFmpeg) Record(ctx context.Context, autoStop bool) (string, error) {
 			// silencedetect reports silence_end only when it first observes a
 			// quiet period. If a speaker starts immediately after enabling the
 			// microphone, that event never occurs; stopping on silence_start is
-			// therefore the reliable definition of “two seconds of silence”.
+			// therefore the reliable definition of “a full --silence pause”.
 			if autoStop && silenceStart.MatchString(line) {
 				stop()
 			}
