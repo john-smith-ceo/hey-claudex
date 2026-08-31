@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,6 +36,14 @@ type Config struct {
 	State      func(string)
 	TmuxTarget string
 	Key        hotkey.Key
+
+	// BusyFile is touched while the microphone is recording. Anything that
+	// speaks out loud can watch it and hold its tongue: a voice-over talking
+	// into the same room ends up inside the recording.
+	BusyFile string
+	// OnRecord runs once when recording starts — to silence whatever is
+	// already speaking, which a file alone cannot do.
+	OnRecord string
 }
 
 type Bridge struct {
@@ -136,8 +147,12 @@ func (b *Bridge) start(autoStop bool) {
 	b.recording, b.cancel = true, cancel
 	fmt.Fprintln(b.config.Log, "recording started")
 	b.state("recording")
+	b.markBusy()
 	go func() {
+		startedAt := time.Now()
 		file, err := b.recorder.Record(ctx, autoStop)
+		recorded := time.Since(startedAt)
+		b.clearBusy()
 		b.mu.Lock()
 		discard := b.session != session
 		if b.session == session {
@@ -157,15 +172,23 @@ func (b *Bridge) start(autoStop bool) {
 		}
 		fmt.Fprintln(b.config.Log, "transcribing")
 		b.state("transcribing")
+		transcribeStart := time.Now()
 		text, err := b.transcribe.Transcribe(context.Background(), file)
+		transcribed := time.Since(transcribeStart)
 		if err != nil {
 			b.fail("transcription failed:", err)
 			return
 		}
+		deliverStart := time.Now()
 		if err := b.sender.Send(context.Background(), text); err != nil {
 			b.fail("tmux delivery failed:", err)
 			return
 		}
+		delivered := time.Since(deliverStart)
+		// Where the wait actually goes is a question that gets asked often and
+		// answered by feel; these three numbers answer it with facts.
+		fmt.Fprintf(b.config.Log, "timing: record %s, transcribe %s, deliver %s, chars %d\n",
+			round(recorded), round(transcribed), round(delivered), len(text))
 		fmt.Fprintf(b.config.Log, "transcription delivered to tmux %s; review it and press Enter yourself\n", b.sender.Target())
 		b.state("pasted")
 		time.AfterFunc(1500*time.Millisecond, func() { b.state("idle") })
@@ -194,6 +217,38 @@ func (b *Bridge) fail(message string, err error) {
 	b.state("error")
 	time.AfterFunc(4*time.Second, func() { b.state("idle") })
 }
+
+// markBusy raises the microphone flag and hushes anything already speaking.
+// The flag carries no content: watchers read its presence and its age, and a
+// recording never runs long enough to look abandoned.
+func (b *Bridge) markBusy() {
+	if b.config.BusyFile != "" {
+		if err := os.MkdirAll(filepath.Dir(b.config.BusyFile), 0o755); err == nil {
+			if file, err := os.Create(b.config.BusyFile); err == nil {
+				_ = file.Close()
+			}
+		}
+	}
+	if b.config.OnRecord == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "sh", "-c", b.config.OnRecord).CombinedOutput(); err != nil {
+		fmt.Fprintf(b.config.Log, "on-record command failed: %v: %s\n", err, strings.TrimSpace(string(output)))
+	}
+}
+
+func (b *Bridge) clearBusy() {
+	if b.config.BusyFile == "" {
+		return
+	}
+	if err := os.Remove(b.config.BusyFile); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(b.config.Log, "clear microphone flag:", err)
+	}
+}
+
+func round(d time.Duration) time.Duration { return d.Round(10 * time.Millisecond) }
 
 func (b *Bridge) state(value string) {
 	if b.config.State != nil {

@@ -18,7 +18,14 @@ import (
 const (
 	wasOption  = "@hey-claudex-status-was"
 	baseOption = "@hey-claudex-status-base"
+	lenWas     = "@hey-claudex-length-was"
+	lenBase    = "@hey-claudex-length-base"
 )
+
+// borrowedLength is generous on purpose. tmux truncates status-right at
+// status-right-length, which defaults to 40 characters — short enough to cut
+// off an appended indicator entirely, which is exactly what happened.
+const borrowedLength = "200"
 
 // Status owns the status line of one tmux session. In a session hey-claudex
 // created it takes the whole line. In a session that already belonged to the
@@ -74,6 +81,27 @@ func (s *Status) Configure(ctx context.Context) error {
 			if err := s.set(ctx, baseOption, base); err != nil {
 				return err
 			}
+			lengthSet, err := sessionOptionIsSet(ctx, s.session, "status-right-length")
+			if err != nil {
+				return err
+			}
+			length, err := effective(ctx, s.session, "status-right-length", lengthSet)
+			if err != nil {
+				return err
+			}
+			lengthState := "unset"
+			if lengthSet {
+				lengthState = "set"
+			}
+			if err := s.set(ctx, lenWas, lengthState); err != nil {
+				return err
+			}
+			if err := s.set(ctx, lenBase, length); err != nil {
+				return err
+			}
+			if err := s.set(ctx, "status-right-length", borrowedLength); err != nil {
+				return err
+			}
 		}
 		return s.Set(ctx, "idle")
 	}
@@ -104,7 +132,7 @@ func (s *Status) Set(ctx context.Context, state string) error {
 		}
 		message := "#[default]" + indicatorWith(state, "#[default]") + "hey-claudex " + s.label(state)
 		if strings.TrimSpace(base) != "" {
-			message = base + " " + message
+			message += " #[default]| " + base
 		}
 		return s.set(ctx, "status-right", message)
 	}
@@ -143,6 +171,25 @@ func Restore(ctx context.Context, session string) (bool, error) {
 		}
 	} else if err := unsetOption(ctx, session, "status-right"); err != nil {
 		return false, err
+	}
+	if lengthWas, err := get(ctx, session, lenWas); err == nil && lengthWas != "" {
+		if lengthWas == "set" {
+			length, err := get(ctx, session, lenBase)
+			if err != nil {
+				return false, err
+			}
+			if err := setOption(ctx, session, "status-right-length", length); err != nil {
+				return false, err
+			}
+		} else if err := unsetOption(ctx, session, "status-right-length"); err != nil {
+			return false, err
+		}
+		if err := unsetOption(ctx, session, lenWas); err != nil {
+			return false, err
+		}
+		if err := unsetOption(ctx, session, lenBase); err != nil {
+			return false, err
+		}
 	}
 	if err := unsetOption(ctx, session, wasOption); err != nil {
 		return false, err

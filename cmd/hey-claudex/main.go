@@ -72,6 +72,12 @@ func main() {
 		os.Exit(listen(nil))
 	}
 
+	// A bare flag means listen: `hey-claude --silence 2s` should not require
+	// spelling out the only command the tool really has.
+	if strings.HasPrefix(os.Args[1], "-") && os.Args[1] != "-h" && os.Args[1] != "--help" {
+		os.Exit(listen(os.Args[1:]))
+	}
+
 	switch os.Args[1] {
 	case "listen", "join":
 		os.Exit(listen(os.Args[2:]))
@@ -370,6 +376,8 @@ func run(args []string) int {
 	mode := fs.String("mode", "tap", "recording mode: tap or push")
 	silence := fs.Duration("silence", 5*time.Second, "tap-mode silence timeout")
 	device := fs.String("device", record.DefaultDevice(), "audio input device")
+	busyFile := fs.String("busy-file", os.Getenv("HEY_CLAUDEX_BUSY_FILE"), "file to touch while recording, so voice-overs stay quiet")
+	onRecord := fs.String("on-record", os.Getenv("HEY_CLAUDEX_ON_RECORD"), "shell command run when recording starts")
 	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-claudex keys")
 	tmuxTarget := fs.String("tmux-target", "hey-claudex:0.0", "tmux pane receiving transcriptions")
 	tmuxSession := fs.String("tmux-session", "hey-claudex", "tmux session owning the hey-claudex status line")
@@ -412,7 +420,7 @@ func run(args []string) int {
 		if err := status.Set(context.Background(), state); err != nil {
 			fmt.Fprintln(os.Stderr, "update tmux status:", err)
 		}
-	}, TmuxTarget: *tmuxTarget, Key: hotKey})
+	}, TmuxTarget: *tmuxTarget, Key: hotKey, BusyFile: *busyFile, OnRecord: *onRecord})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "initialize:", err)
 		return 1
@@ -437,6 +445,10 @@ func listen(args []string) int {
 	keyName := fs.String("key", hotkey.Default, "hotkey; run: hey-claudex keys")
 	target := fs.String("target", "", "tmux pane receiving transcriptions (default: the pane you run this from)")
 	any := fs.Bool("any", false, "speak into the pane whatever runs in it")
+	silence := fs.Duration("silence", 5*time.Second, "how long a pause ends the recording in tap mode")
+	device := fs.String("device", record.DefaultDevice(), "audio input device")
+	busyFile := fs.String("busy-file", os.Getenv("HEY_CLAUDEX_BUSY_FILE"), "file to touch while recording, so voice-overs stay quiet")
+	onRecord := fs.String("on-record", os.Getenv("HEY_CLAUDEX_ON_RECORD"), "shell command run when recording starts")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -503,12 +515,14 @@ func listen(args []string) int {
 		return 1
 	}
 	command := []string{"new-window", "-d", "-t", session, "-n", voiceWindow, "-c", mustGetwd(), executable,
-		"run", "--attached", "--mode", *mode, "--key", hotKey.Name, "--tmux-target", pane, "--tmux-session", session}
+		"run", "--attached", "--mode", *mode, "--key", hotKey.Name, "--tmux-target", pane, "--tmux-session", session,
+		"--silence", silence.String(), "--device", *device,
+		"--busy-file", *busyFile, "--on-record", *onRecord}
 	if output, err := exec.Command("tmux", command...).CombinedOutput(); err != nil {
 		fmt.Fprintln(os.Stderr, "start voice listener:", strings.TrimSpace(string(output)))
 		return 1
 	}
-	fmt.Printf("Слушаю: %s (%s). Речь придёт в панель %s — проверьте текст и нажмите Enter сами.\n", hotKey.Name, *mode, pane)
+	fmt.Printf("Слушаю: %s (%s, пауза %s). Речь придёт в панель %s — проверьте текст и нажмите Enter сами.\n", hotKey.Name, *mode, *silence, pane)
 	fmt.Println("Остановить: hey-claudex stop")
 	return 0
 }
