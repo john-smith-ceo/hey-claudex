@@ -1,0 +1,20 @@
+{
+  "name": "hey-claudex",
+  "interface": {
+    "displayName": "Hey Claudex"
+  },
+  "plugins": [
+    {
+      "name": "hey-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hey-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -22,6 +22,23 @@ than one that never arrived. `--any` overrides it.
 
 ## Install
 
+### Codex plugin
+
+После обычной установки бинарника добавьте marketplace из GitHub и включите
+плагин:
+
+```sh
+codex plugin marketplace add john-smith-ceo/hey-claudex --ref main
+codex plugin add hey-codex@hey-claudex
+```
+
+В панели tmux, где уже работает Codex, вызовите `/hey-codex`. Плагин включит
+слушатель для этой же панели: не нужен отдельный target, соседняя панель или
+другой assistant. Остановить: `hey-claudex stop`.
+
+Плагин управляет уже установленным `hey-codex`; `ffmpeg`, `tmux`, доступ к
+микрофону и сам бинарник всё ещё устанавливаются по инструкции ниже.
+
 ### macOS
 
 ```sh
